@@ -85,7 +85,7 @@ impl<'a> Service<'a> {
         let socket_connections = self.connections.clone();
         let shard_id = self.shard_id.to_string();
         let host_addr = self.host_addr.to_string();
-        let jh_ws = tokio::spawn(async move {
+        let joinhandle_ws = tokio::spawn(async move {
             trace!("Launching socket shard");
             let try_socket = TcpListener::bind(&host_addr).await;
             let listener = try_socket.expect("Failed to bind");
@@ -105,7 +105,7 @@ impl<'a> Service<'a> {
         let shard_id = self.shard_id.to_string();
         let redis_addr = self.redis_addr.to_string();
         let socket_connections = self.connections.clone();
-        let jh_presence = tokio::spawn(async move {
+        let joinhandle_presence = tokio::spawn(async move {
             let client = redis::Client::open(redis_addr).expect("redis connection failed");
             let mut con = client
                 .get_connection()
@@ -132,7 +132,7 @@ impl<'a> Service<'a> {
         // In case of a critical error the service will exit (error_rx)
         // and the option it returns will contain the CriticalError
         let critical_error =
-            extended_select::select(jh_ws, jh_presence, self.error_channel.1.take().unwrap()).await;
+            extended_select::select(joinhandle_ws, joinhandle_presence, self.error_channel.1.take().unwrap()).await;
         match critical_error {
             Some(error) => {
                 match error {

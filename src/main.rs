@@ -18,5 +18,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut service = Service::new(&shard_id, "0.0.0.0:5000", "redis://127.0.0.1").await;
 
     // Run until finished
-    service.run(middleware::presence_package_interceptor::<String>).await
+    service.run(middleware::shard_payload_interceptor::<String>).await
 }

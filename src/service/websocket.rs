@@ -18,6 +18,7 @@ pub async fn accept_connection(
     sockets: Arc<DashMap<Uuid, SocketClient>>,
     shard_id: String,
 ) {
+    // Get ip address of peer
     let addr = stream
         .peer_addr()
         .expect("connected streams should have a peer address");
@@ -40,6 +41,7 @@ pub async fn accept_connection(
     let client = SocketClient::new(addr, sender.clone());
     sockets.insert(*client.id(), client.clone());
 
+    // Prepare reader task
     let read_channel = read
         .try_filter(|message| future::ready(!message.is_close()))
         .try_for_each(|message| {
@@ -82,6 +84,7 @@ pub async fn accept_connection(
         }
     });
 
+    // Trigger on open event for socket client
     sockets
         .get_mut(client.id())
         .expect("socket connection does not exist")
@@ -123,6 +126,7 @@ pub async fn accept_connection(
         }
     }
 
+    // Remove the socket locally
     sockets.remove(client.id());
     info!("Socket disconnected: {}", addr);
 }
