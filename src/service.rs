@@ -17,7 +17,8 @@ pub mod redis_pool;
 pub mod websocket;
 
 pub struct Service<'a> {
-    server_id: &'a str,
+    // shard enviromental variables
+    shard_id: &'a str,
     host_addr: &'a str,
     redis_addr: &'a str,
 
@@ -35,7 +36,7 @@ pub struct Service<'a> {
 }
 
 impl<'a> Service<'a> {
-    pub async fn new(server_id: &'a str, host_addr: &'a str, redis_addr: &'a str) -> Service<'a> {
+    pub async fn new(shard_id: &'a str, host_addr: &'a str, redis_addr: &'a str) -> Service<'a> {
         // Create redis connection poool
         let manager = RedisConnectionManager::new(redis_addr).unwrap();
         let redis_pool = r2d2::Pool::builder().build(manager).unwrap();
@@ -44,7 +45,7 @@ impl<'a> Service<'a> {
         let (error_tx, error_rx) = futures::channel::oneshot::channel::<CriticalError>();
 
         Self {
-            server_id,
+            shard_id,
             host_addr,
             redis_addr,
 
@@ -55,48 +56,57 @@ impl<'a> Service<'a> {
         }
     }
 
-    pub async fn run(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn run<T>(
+        &mut self,
+        middleware: fn(Arc<DashMap<Uuid, SocketClient>>, T),
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        T: redis::FromRedisValue + 'static,
+    {
         // Create a seperate thread for WebSockets
         let redis_pool = self.redis_pool.clone();
         let socket_connections = self.connections.clone();
-        let server_id = self.server_id.to_string();
+        let shard_id = self.shard_id.to_string();
         let host_addr = self.host_addr.to_string();
         let jh_ws = tokio::spawn(async move {
-            trace!("Launching socket server");
+            trace!("Launching socket shard");
             let try_socket = TcpListener::bind(&host_addr).await;
             let listener = try_socket.expect("Failed to bind");
-            info!("Socket server listening on: {}", host_addr);
+            info!("Socket shard listening on: {}", host_addr);
 
             while let Ok((stream, _)) = listener.accept().await {
                 tokio::spawn(websocket::accept_connection(
                     stream,
                     redis_pool.clone(),
                     socket_connections.clone(),
-                    server_id.to_string(),
+                    shard_id.to_string(),
                 ));
             }
         });
 
         // Create a seperate thread for PubSub channels
-        let server_id = self.server_id.to_string();
+        let shard_id = self.shard_id.to_string();
         let redis_addr = self.redis_addr.to_string();
         let socket_connections = self.connections.clone();
         let jh_presence = tokio::spawn(async move {
-            let client =
-                redis::Client::open(redis_addr).expect("redis connection failed");
+            let client = redis::Client::open(redis_addr).expect("redis connection failed");
             let mut con = client
                 .get_connection()
                 .expect("could not get redis connection");
 
-            info!("Server id registered to pub/sub: {}", server_id);
+            info!("shard id registered to pub/sub: {}", shard_id);
 
+            // Subscribe to presence channel and receive messages from other shards
             let _: () = con
-                .subscribe(&[server_id], |msg| {
-                    let payload: String = msg
+                .subscribe(&[shard_id], |msg| {
+                    let payload: T = msg
                         .get_payload()
                         .expect("could not get pub/sub message payload");
 
-                    return ControlFlow::Continue;
+                    // Call middleware function and pass in the payload
+                    middleware(socket_connections.clone(), payload);
+
+                    ControlFlow::Continue
                 })
                 .unwrap();
         });

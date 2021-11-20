@@ -16,7 +16,7 @@ pub async fn accept_connection(
     stream: TcpStream,
     redis_pool: Pool<RedisConnectionManager>,
     sockets: Arc<DashMap<Uuid, SocketClient>>,
-    server_id: String,
+    shard_id: String,
 ) {
     let addr = stream
         .peer_addr()
@@ -38,23 +38,20 @@ pub async fn accept_connection(
 
     // Register socket client
     let client = SocketClient::new(addr, sender.clone());
-    sockets.insert(client.id().clone(), client.clone());
+    sockets.insert(*client.id(), client.clone());
 
     let read_channel = read
         .try_filter(|message| future::ready(!message.is_close()))
         .try_for_each(|message| {
-            let client_id = client.id().clone();
+            let client_id = *client.id();
             let socket = sockets.get_mut(&client_id);
-            match socket {
-                Some(mut socket) => match futures::executor::block_on(
-                    socket.on_message(redis_pool.clone(), message),
-                ) {
+            if let Some(mut socket) = socket {
+                match futures::executor::block_on(socket.on_message(redis_pool.clone(), message)) {
                     Ok(_) => {}
                     Err(e) => {
                         trace!("Failed to parse message: {}", e);
                     }
-                },
-                None => {}
+                }
             }
 
             future::ok(())
@@ -86,15 +83,15 @@ pub async fn accept_connection(
     });
 
     sockets
-        .get_mut(&client.id())
+        .get_mut(client.id())
         .expect("socket connection does not exist")
         .on_open();
 
     // Registers the socket in the global datastore of sockets
     let res = sockets
-        .get(&client.id())
+        .get(client.id())
         .expect("socket connection does not exist")
-        .register(&redis_pool, server_id);
+        .register(&redis_pool, shard_id);
     match res {
         Ok(_) => {}
         Err(e) => {
@@ -102,7 +99,7 @@ pub async fn accept_connection(
                 "An error occured while registering user on the global socket datastore: {}",
                 e
             );
-            sockets.remove(&client.id());
+            sockets.remove(client.id());
         }
     }
 
@@ -112,7 +109,7 @@ pub async fn accept_connection(
 
     // Unregisters the socket in the global datastore of sockets
     let res = sockets
-        .get(&client.id())
+        .get(client.id())
         .expect("socket connection does not exist")
         .unregister(&redis_pool);
     match res {
@@ -126,6 +123,6 @@ pub async fn accept_connection(
         }
     }
 
-    sockets.remove(&client.id());
+    sockets.remove(client.id());
     info!("Socket disconnected: {}", addr);
 }

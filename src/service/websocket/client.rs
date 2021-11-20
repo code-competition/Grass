@@ -37,11 +37,11 @@ impl SocketClient {
     pub fn register(
         &self,
         redis_pool: &Pool<RedisConnectionManager>,
-        server_id: String,
+        shard_id: String,
     ) -> Result<(), String> {
         let mut conn = redis_pool.get().map_err(|e| e.to_string())?;
         let _: () = conn
-            .set(format!("SOCKET:USER:{}", self.id), server_id)
+            .set(format!("SOCKET:USER:{}", self.id), shard_id)
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -64,13 +64,13 @@ impl SocketClient {
                 info!("Received text message: {}", text);
                 let mut conn = redis_pool.get()?;
 
-                // Fetch the server id where the client is registered
-                let server_id: String = conn.get(format!("SOCKET:USER:{}", text))?;
+                // Fetch the shard id where the client is registered
+                let shard_id: String = conn.get(format!("SOCKET:USER:{}", text))?;
 
-                info!("Server id: {}", server_id);
+                info!("shard id: {}", shard_id);
 
                 // Send the message to redis channel
-                let _: () = conn.publish(server_id, text).expect("failed to publish");
+                let _: () = conn.publish(shard_id, text).expect("failed to publish");
             }
             Message::Binary(bin) => {
                 info!("Received binary message: {:?}", bin);
