@@ -27,8 +27,6 @@ pub mod websocket;
     └────────► accept_connection(...) ───► split reader and writer
                                                      │
                                                      │
-                                                     │
-                                                     │
     ┌───────── register user in database ◄───────────┘
     │
     │

@@ -6,9 +6,9 @@ use uuid::Uuid;
 
 use crate::service::websocket::client::SocketClient;
 
-pub fn presence_package_interceptor<T>(_connections: Arc<DashMap<Uuid, SocketClient>>, _payload: T)
+pub fn presence_package_interceptor<T>(_connections: Arc<DashMap<Uuid, SocketClient>>, payload: T)
 where
-    T: FromRedisValue,
+    T: FromRedisValue + std::fmt::Debug,
 {
-
+    println!("Received payload: {:?}", payload);
 }
