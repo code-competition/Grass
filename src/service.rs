@@ -16,6 +16,25 @@ pub mod extended_select;
 pub mod redis_pool;
 pub mod websocket;
 
+/*
+    # Flow chart of the websocket part of this service
+
+    main() ────────────────► service.run(...) ──┐
+                                                │
+    ┌───────── on connection received ──────────┘
+    │
+    │
+    └────────► accept_connection(...) ───► split reader and writer
+                                                     │
+                                                     │
+                                                     │
+                                                     │
+    ┌───────── register user in database ◄───────────┘
+    │
+    │
+    └────► on received from other shards ────► send to middleware
+*/
+
 pub struct Service<'a> {
     // shard enviromental variables
     shard_id: &'a str,
