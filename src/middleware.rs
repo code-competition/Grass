@@ -13,5 +13,5 @@ pub fn shard_payload_interceptor<T>(_connections: Arc<DashMap<Uuid, SocketClient
 where
     T: FromRedisValue + std::fmt::Debug,
 {
-    println!("Received payload: {:?}", payload);
+    info!("Received payload: {:?}", payload);
 }

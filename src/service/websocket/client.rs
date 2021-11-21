@@ -62,15 +62,15 @@ impl SocketClient {
         match message {
             Message::Text(text) => {
                 info!("Received text message: {}", text);
-                let mut conn = redis_pool.get()?;
+                // let mut conn = redis_pool.get()?;
 
                 // Fetch the shard id where the client is registered
-                let shard_id: String = conn.get(format!("SOCKET:USER:{}", text))?;
+                // let shard_id: String = conn.get(format!("SOCKET:USER:{}", text))?;
 
-                info!("shard id: {}", shard_id);
+                // info!("shard id: {}", shard_id);
 
                 // Send the message to redis channel
-                let _: () = conn.publish(shard_id, text).expect("failed to publish");
+                // let _: () = conn.publish(shard_id, text).expect("failed to publish");
             }
             Message::Binary(bin) => {
                 info!("Received binary message: {:?}", bin);
