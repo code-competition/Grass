@@ -28,12 +28,16 @@ impl SocketClient {
         }
     }
 
+    /// Triggered once the client has been registered and is connected
+    ///
+    /// Sends a hello with the socket id
     pub fn on_open(&mut self) {
         let model = DefaultModel::new(models::Hello { id: self.id });
         self.send_model(model)
             .expect("could not send hello message");
     }
 
+    /// Registers the socket client in the global connection datastore
     pub fn register(
         &self,
         redis_pool: &Pool<RedisConnectionManager>,
@@ -46,6 +50,7 @@ impl SocketClient {
         Ok(())
     }
 
+    /// Unregisters the socket client from the global connection datastore
     pub fn unregister(&self, redis_pool: &Pool<RedisConnectionManager>) -> Result<(), String> {
         let mut conn = redis_pool.get().map_err(|e| e.to_string())?;
         let _ = conn
@@ -91,6 +96,7 @@ impl SocketClient {
         Ok(())
     }
 
+    /// Sends a model (JSON serializable object) to the client
     #[inline]
     pub fn send_model<'a, T>(&self, default: DefaultModel<T>) -> Result<(), SendError<Message>>
     where
@@ -99,6 +105,7 @@ impl SocketClient {
         self.send(Message::Text(serde_json::to_string(&default).unwrap()))
     }
 
+    /// Sends a raw tungstenite socket message
     #[inline]
     pub fn send(&self, message: Message) -> Result<(), SendError<Message>> {
         info!("not triggered?");

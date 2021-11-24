@@ -2,6 +2,7 @@ use serde_derive::{Deserialize, Serialize};
 
 use super::{OpCode, OpCodeFetcher};
 
+// Model is to be converted into JSON when serialized before sending to clients 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefaultModel<T> {
     op: OpCode,

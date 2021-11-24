@@ -42,11 +42,16 @@ pub async fn accept_connection(
     sockets.insert(*client.id(), client.clone());
 
     // Prepare reader task
+    // This task reads all incoming messages from the **CLIENT** coming through the TcpListener
     let read_channel = read
         .try_filter(|message| future::ready(!message.is_close()))
         .try_for_each(|message| {
+            // Get the client id
             let client_id = *client.id();
+            // Get the local socket from the connections hashmap
             let socket = sockets.get_mut(&client_id);
+
+            // Trigger on_message(...) event for the client
             if let Some(mut socket) = socket {
                 match futures::executor::block_on(socket.on_message(redis_pool.clone(), message)) {
                     Ok(_) => {}
@@ -59,7 +64,7 @@ pub async fn accept_connection(
             future::ok(())
         });
 
-    // Handle messages sent from received and from other sockets
+    // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
     let write_channel = tokio::spawn(async move {
         loop {
             info!("Ready to receive message from channel");

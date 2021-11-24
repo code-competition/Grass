@@ -85,6 +85,10 @@ impl<'a> Service<'a> {
         let socket_connections = self.connections.clone();
         let shard_id = self.shard_id.to_string();
         let host_addr = self.host_addr.to_string();
+
+        // Spawns websocket server task which handles all incoming tokio-tungstenite connections
+        // And redirects them into the function websocket::accept_connection(...)
+        // TCP system works with tokio-tungstenite through tokios TcpListener
         let joinhandle_ws = tokio::spawn(async move {
             trace!("Launching socket shard");
             let try_socket = TcpListener::bind(&host_addr).await;
@@ -101,11 +105,15 @@ impl<'a> Service<'a> {
             }
         });
 
-        // Create a seperate thread for PubSub channels
+        // Clone arcs and get ip addresses for redis to send into redis reader task
         let shard_id = self.shard_id.to_string();
         let redis_addr = self.redis_addr.to_string();
         let socket_connections = self.connections.clone();
+
+        // Create a seperate thread for PubSub channels
+        // Spawns the tokio task that handles all incoming messages from redis
         let joinhandle_presence = tokio::spawn(async move {
+            // Opens a new redis connection outside the pool to leverage better connection speeds
             let client = redis::Client::open(redis_addr).expect("redis connection failed");
             let mut con = client
                 .get_connection()
@@ -113,7 +121,7 @@ impl<'a> Service<'a> {
 
             info!("shard id registered to pub/sub: {}", shard_id);
 
-            // Subscribe to presence channel and receive messages from other shards
+            // Subscribe to presence channel and receive messages from other shards (socket servers)
             let _: () = con
                 .subscribe(&[shard_id], |msg| {
                     let payload: T = msg
