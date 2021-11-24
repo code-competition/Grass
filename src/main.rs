@@ -8,6 +8,8 @@ mod middleware;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    std::env::set_var("RUST_LOG", "grass");
+
     env_logger::init();
 
     // Generate random shard (container instance) id
