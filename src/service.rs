@@ -23,12 +23,10 @@ pub mod websocket;
                                                 │
     ┌───────── on connection received ──────────┘
     │
-    │
     └────────► accept_connection(...) ───► split reader and writer
                                                      │
                                                      │
     ┌───────── register user in database ◄───────────┘
-    │
     │
     └────► on received from other shards ────► send to middleware
 */

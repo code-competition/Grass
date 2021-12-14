@@ -54,9 +54,12 @@ pub async fn accept_connection(
             // Trigger on_message(...) event for the client
             if let Some(mut socket) = socket {
                 match futures::executor::block_on(socket.on_message(redis_pool.clone(), message)) {
-                    Ok(_) => {}
+                    Ok(should_close) => {
+                        // Todo: Find a way to close the socket if it errors during on message
+                    }
                     Err(e) => {
                         trace!("Failed to parse message: {}", e);
+                        // Todo: Close the connection
                     }
                 }
             }

@@ -3,12 +3,13 @@ use std::net::SocketAddr;
 use crossbeam::channel::{SendError, Sender};
 use r2d2::Pool;
 use redis::Commands;
+use serde_json::Value;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 use crate::service::redis_pool::RedisConnectionManager;
 
-use self::models::DefaultModel;
+use self::models::{DefaultModel, Error};
 
 mod models;
 
@@ -59,23 +60,26 @@ impl SocketClient {
         Ok(())
     }
 
+    /// Called when a client receives a new message
     pub async fn on_message(
         &mut self,
         redis_pool: Pool<RedisConnectionManager>,
         message: Message,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<bool, Box<dyn std::error::Error>> {
+        let mut should_close = false;
         match message {
             Message::Text(text) => {
                 info!("Received text message: {}", text);
-                // let mut conn = redis_pool.get()?;
-
-                // Fetch the shard id where the client is registered
-                // let shard_id: String = conn.get(format!("SOCKET:USER:{}", text))?;
-
-                // info!("shard id: {}", shard_id);
-
-                // Send the message to redis channel
-                // let _: () = conn.publish(shard_id, text).expect("failed to publish");
+                // Try to parse the message according to the Default JSON layout
+                let model: Result<DefaultModel<Value>, serde_json::Error> = serde_json::from_str(&text);
+                match model {
+                    Ok(model) => todo!(),
+                    Err(_) => {
+                        error!("Receieved invalid model from socket, closing connection.");
+                        should_close = true;
+                        self.send_error("Invalid model, closing connection.", 0x1)?;
+                    },
+                }
             }
             Message::Binary(bin) => {
                 info!("Received binary message: {:?}", bin);
@@ -93,7 +97,11 @@ impl SocketClient {
             }
         }
 
-        Ok(())
+        Ok(should_close)
+    }
+
+    pub fn send_error<'a>(&self, err: &'a str, code: u32) -> Result<(), SendError<Message>> {
+        self.send_model(DefaultModel::new(Error { err, code }))
     }
 
     /// Sends a model (JSON serializable object) to the client

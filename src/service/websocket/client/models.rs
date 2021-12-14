@@ -3,16 +3,18 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use default::DefaultModel;
 pub use hello::Hello;
+pub use error::Error;
 
 // All models are derived from default
 mod default;
 mod hello;
+mod error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(u8)]
 pub enum OpCode {
     Hello = 0,
-    DebugDistributed = 1,
+    Error = 1,
 }
 
 impl Serialize for OpCode {
