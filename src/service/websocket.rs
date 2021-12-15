@@ -43,6 +43,7 @@ pub async fn accept_connection(
 
     // Prepare reader task
     // This task reads all incoming messages from the **CLIENT** coming through the TcpListener
+    let shard_id_message = shard_id.clone();
     let read_channel = read
         .try_filter(|message| future::ready(!message.is_close()))
         .try_for_each(|message| {
@@ -53,16 +54,14 @@ pub async fn accept_connection(
 
             // Trigger on_message(...) event for the client
             if let Some(mut socket) = socket {
-                match futures::executor::block_on(socket.on_message(redis_pool.clone(), message)) {
+                match futures::executor::block_on(socket.on_message(redis_pool.clone(), message, &shard_id_message.clone())) {
                     Ok(should_close) => {
-                        // Todo: Find a way to close the socket if it errors during on message
                         if should_close {
                             return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
                         }
                     }
                     Err(e) => {
-                        trace!("Failed to parse message: {}", e);
-                        // Todo: Close the connection
+                        error!("Failed to parse message socket: {}", e);
                         return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
                     }
                 }

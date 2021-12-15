@@ -9,9 +9,13 @@ use uuid::Uuid;
 
 use crate::service::redis_pool::RedisConnectionManager;
 
-use self::models::{DefaultModel, Error};
+use self::{
+    game::Game,
+    models::{DefaultModel, Error},
+};
 use message_handler::ClientMessageHandler;
 
+mod game;
 mod message_handler;
 mod models;
 
@@ -20,6 +24,9 @@ pub struct SocketClient {
     id: Uuid,
     addr: SocketAddr,
     socket_channel: Sender<Message>,
+
+    // Some(...) if user is in a game
+    game: Option<Game>,
 }
 
 impl SocketClient {
@@ -28,6 +35,7 @@ impl SocketClient {
             id: uuid::Uuid::new_v4(),
             addr,
             socket_channel,
+            game: None,
         }
     }
 
@@ -67,6 +75,7 @@ impl SocketClient {
         &mut self,
         redis_pool: Pool<RedisConnectionManager>,
         message: Message,
+        shard_id: &str,
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut should_close = false;
         match message {
@@ -78,13 +87,13 @@ impl SocketClient {
                 match model {
                     Ok(model) => {
                         if let Err(_) =
-                            ClientMessageHandler::handle_message(self, redis_pool, model)
+                            ClientMessageHandler::handle_message(self, redis_pool, model, shard_id)
                         {
                             should_close = true;
                         }
                     }
                     Err(e) => {
-                        error!("{:?}", e);
+                        error!("Client reached an error {:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
                         self.send_error("Invalid model, closing connection.", 0x1)?;
