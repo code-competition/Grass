@@ -2,16 +2,14 @@ use num_enum::TryFromPrimitive;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 pub use default::DefaultModel;
-pub use hello::Hello;
-pub use error::Error;
-pub use join_game::JoinGame;
 
 // All models are derived from default
-mod default;
-mod hello;
-mod error;
-mod join_game;
-mod game_event;
+pub mod default;
+pub mod hello;
+pub mod error;
+pub mod join_game;
+pub mod join_game_response;
+pub mod game_event;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(u8)]
@@ -19,7 +17,8 @@ pub enum OpCode {
     Hello = 0,
     Error = 1,
     JoinGame = 2,
-    GameEvent = 3
+    JoinGameResponse = 3,
+    GameEvent = 4
 }
 
 impl Serialize for OpCode {

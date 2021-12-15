@@ -11,7 +11,7 @@ use crate::service::redis_pool::RedisConnectionManager;
 
 use self::{
     game::Game,
-    models::{DefaultModel, Error},
+    models::{DefaultModel, hello::Hello, error::Error},
 };
 use message_handler::ClientMessageHandler;
 
@@ -43,7 +43,7 @@ impl SocketClient {
     ///
     /// Sends a hello with the socket id
     pub fn on_open(&mut self) {
-        let model = DefaultModel::new(models::Hello { id: self.id });
+        let model = DefaultModel::new(Hello { id: self.id });
         self.send_model(model)
             .expect("could not send hello message");
     }

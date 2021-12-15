@@ -4,11 +4,13 @@ use serde_json::Value;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
-    websocket::client::{models::{Error, JoinGame}, game::Game},
+    websocket::client::{
+        game::Game,
+    },
 };
 
 use super::{
-    models::{DefaultModel, OpCode},
+    models::{join_game_response::JoinGameResponse, DefaultModel, OpCode, join_game::JoinGame, error::Error},
     SocketClient,
 };
 
@@ -42,10 +44,11 @@ impl ClientMessageHandler {
                             err: "Internal Server Error",
                             code: 100,
                         }));
-                    },
+                    }
                 };
 
-                let game: redis::RedisResult<String> = conn.get(format!("GAME:{}", join_game.game_id));
+                let game: redis::RedisResult<String> =
+                    conn.get(format!("GAME:{}", join_game.game_id.clone()));
                 let game = match game {
                     Ok(game) => game,
                     Err(_) => {
@@ -53,14 +56,22 @@ impl ClientMessageHandler {
                             err: "No game was found",
                             code: 100,
                         }));
-                    },
+                    }
                 };
 
                 // Check if the game has been initialized
                 if game == String::new() {
                     // Register as host
-                    let _: () = conn.set(format!("GAME:{}", join_game.game_id), format!("SHARD_ID:{}", shard_id))?;
-                    client.game = Some(Game::new(true, join_game.game_id));
+                    let _: () = conn.set(
+                        format!("GAME:{}", join_game.game_id),
+                        format!("SHARD_ID:{}", shard_id),
+                    )?;
+                    client.game = Some(Game::new(true, join_game.game_id.clone()));
+                    client.send_model(DefaultModel::new(JoinGameResponse {
+                        game_id: join_game.game_id,
+                        is_host: true,
+                        success: true,
+                    }))?;
                 } else {
                     // Should join an already existing game through the shard communication protocol (redis)
                     // Or by doing it locally, if the game is hosted on the same server as the socket client
