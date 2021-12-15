@@ -10,7 +10,9 @@ use uuid::Uuid;
 use crate::service::redis_pool::RedisConnectionManager;
 
 use self::models::{DefaultModel, Error};
+use message_handler::ClientMessageHandler;
 
+mod message_handler;
 mod models;
 
 #[derive(Debug, Clone)]
@@ -71,30 +73,33 @@ impl SocketClient {
             Message::Text(text) => {
                 info!("Received text message: {}", text);
                 // Try to parse the message according to the Default JSON layout
-                let model: Result<DefaultModel<Value>, serde_json::Error> = serde_json::from_str(&text);
+                let model: Result<DefaultModel<Value>, serde_json::Error> =
+                    serde_json::from_str(&text);
                 match model {
-                    Ok(model) => todo!(),
-                    Err(_) => {
+                    Ok(model) => {
+                        if let Err(_) =
+                            ClientMessageHandler::handle_message(self, redis_pool, model)
+                        {
+                            should_close = true;
+                        }
+                    }
+                    Err(e) => {
+                        error!("{:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
                         self.send_error("Invalid model, closing connection.", 0x1)?;
-                    },
+                    }
                 }
             }
-            Message::Binary(bin) => {
-                info!("Received binary message: {:?}", bin);
-            }
-            Message::Ping(bin) => {
-                info!("Received ping message: {:?}", bin);
-                self.send(Message::Pong(bin))?
-            }
+            Message::Ping(bin) => self.send(Message::Pong(bin))?,
             Message::Pong(bin) => {
-                info!("Received pong message: {:?}", bin);
                 self.send(Message::Ping(bin))?;
             }
             Message::Close(reason) => {
                 info!("Received close message: {:?}", reason);
+                return Ok(true);
             }
+            _ => {}
         }
 
         Ok(should_close)

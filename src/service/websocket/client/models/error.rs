@@ -1,4 +1,6 @@
-use serde::{Serialize, Deserialize};
+use std::fmt::Display;
+
+use serde::{Deserialize, Serialize};
 
 use super::OpCode;
 
@@ -14,3 +16,11 @@ impl<'a> super::OpCodeFetcher for Error<'a> {
         OpCode::Error
     }
 }
+
+impl<'a> Display for Error<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Code {} Error \"{}\"", self.code, self.err)
+    }
+}
+
+impl<'a> std::error::Error for Error<'a> {}

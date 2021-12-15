@@ -5,8 +5,8 @@ use super::{OpCode, OpCodeFetcher};
 // Model is to be converted into JSON when serialized before sending to clients 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DefaultModel<T> {
-    op: OpCode,
-    d: T
+    pub(crate) op: OpCode,
+    pub(crate) d: Option<T>
 }
 
 impl<T> DefaultModel<T> where T: OpCodeFetcher {
@@ -15,7 +15,7 @@ impl<T> DefaultModel<T> where T: OpCodeFetcher {
 
         DefaultModel {
             op,
-            d
+            d: Some(d)
         }
     }
 } 

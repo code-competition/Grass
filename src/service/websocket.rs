@@ -56,10 +56,14 @@ pub async fn accept_connection(
                 match futures::executor::block_on(socket.on_message(redis_pool.clone(), message)) {
                     Ok(should_close) => {
                         // Todo: Find a way to close the socket if it errors during on message
+                        if should_close {
+                            return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+                        }
                     }
                     Err(e) => {
                         trace!("Failed to parse message: {}", e);
                         // Todo: Close the connection
+                        return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
                     }
                 }
             }
