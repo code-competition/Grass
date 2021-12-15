@@ -1,6 +1,7 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use crossbeam::channel::{SendError, Sender};
+use dashmap::DashMap;
 use r2d2::Pool;
 use redis::Commands;
 use serde_json::Value;
@@ -43,9 +44,18 @@ impl SocketClient {
     ///
     /// Sends a hello with the socket id
     pub fn on_open(&mut self) {
+        trace!("Client connected with address {}", self.addr);
+
         let model = DefaultModel::new(Hello { id: self.id });
         self.send_model(model)
             .expect("could not send hello message");
+    }
+
+    /// Triggered when connection is closing
+    pub fn on_close(&mut self) {
+        if let Some(game) = &mut self.game {
+            game.shutdown();
+        }
     }
 
     /// Registers the socket client in the global connection datastore
@@ -76,6 +86,7 @@ impl SocketClient {
         redis_pool: Pool<RedisConnectionManager>,
         message: Message,
         shard_id: &str,
+        sockets: Arc<DashMap<Uuid, SocketClient>>,
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut should_close = false;
         match message {
@@ -87,7 +98,7 @@ impl SocketClient {
                 match model {
                     Ok(model) => {
                         if let Err(_) =
-                            ClientMessageHandler::handle_message(self, redis_pool, model, shard_id)
+                            ClientMessageHandler::handle_message(self, sockets, redis_pool, model, shard_id)
                         {
                             should_close = true;
                         }
@@ -96,7 +107,7 @@ impl SocketClient {
                         error!("Client reached an error {:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
-                        self.send_error("Invalid model, closing connection.", 0x1)?;
+                        self.send_error("Invalid model, closing connection.")?;
                     }
                 }
             }
@@ -114,8 +125,10 @@ impl SocketClient {
         Ok(should_close)
     }
 
-    pub fn send_error<'a>(&self, err: &'a str, code: u32) -> Result<(), SendError<Message>> {
-        self.send_model(DefaultModel::new(Error { err, code }))
+    /// Sends a error to the client
+    #[inline]
+    pub fn send_error<'a>(&self, err: &'a str) -> Result<(), SendError<Message>> {
+        self.send_model(DefaultModel::new(Error { err }))
     }
 
     /// Sends a model (JSON serializable object) to the client
@@ -127,10 +140,9 @@ impl SocketClient {
         self.send(Message::Text(serde_json::to_string(&default).unwrap()))
     }
 
-    /// Sends a raw tungstenite socket message
+    /// Sends a raw websocket message
     #[inline]
     pub fn send(&self, message: Message) -> Result<(), SendError<Message>> {
-        info!("not triggered?");
         self.socket_channel().send(message)
     }
 

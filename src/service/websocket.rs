@@ -54,15 +54,24 @@ pub async fn accept_connection(
 
             // Trigger on_message(...) event for the client
             if let Some(mut socket) = socket {
-                match futures::executor::block_on(socket.on_message(redis_pool.clone(), message, &shard_id_message.clone())) {
+                match futures::executor::block_on(socket.on_message(
+                    redis_pool.clone(),
+                    message,
+                    &shard_id_message.clone(),
+                    sockets.clone(),
+                )) {
                     Ok(should_close) => {
                         if should_close {
-                            return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+                            return future::err(
+                                tokio_tungstenite::tungstenite::Error::ConnectionClosed,
+                            );
                         }
                     }
                     Err(e) => {
                         error!("Failed to parse message socket: {}", e);
-                        return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+                        return future::err(
+                            tokio_tungstenite::tungstenite::Error::ConnectionClosed,
+                        );
                     }
                 }
             }
@@ -73,14 +82,14 @@ pub async fn accept_connection(
     // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
     let write_channel = tokio::spawn(async move {
         loop {
-            info!("Ready to receive message from channel");
+            trace!("Ready to receive message from channel");
             match receiver.recv() {
                 Ok(message) => match write.send(message).await {
                     Ok(_) => {
-                        info!("Sent to websocket");
+                        trace!("Sent to websocket");
                     }
                     Err(e) => {
-                        trace!(
+                        error!(
                             "Socket message could not be written to websocket write channel: {}",
                             e
                         );
@@ -91,7 +100,6 @@ pub async fn accept_connection(
                     break;
                 }
             }
-            info!("Time to get ready again");
         }
     });
 
@@ -120,6 +128,12 @@ pub async fn accept_connection(
     // Start the reader and writer tasks
     futures::pin_mut!(read_channel, write_channel);
     let _ = futures::future::select(read_channel, write_channel).await;
+
+    // Trigger on close event
+    sockets
+        .get_mut(client.id())
+        .expect("socket connection does not exist")
+        .on_close();
 
     // Unregisters the socket in the global datastore of sockets
     let res = sockets

@@ -7,7 +7,6 @@ use super::OpCode;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Error<'a> {
     pub(crate) err: &'a str,
-    pub(crate) code: u32,
 }
 
 impl<'a> super::OpCodeFetcher for Error<'a> {
@@ -19,7 +18,7 @@ impl<'a> super::OpCodeFetcher for Error<'a> {
 
 impl<'a> Display for Error<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Code {} Error \"{}\"", self.code, self.err)
+        write!(f, "Error \"{}\"", self.err)
     }
 }
 
