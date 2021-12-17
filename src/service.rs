@@ -15,6 +15,7 @@ pub mod error;
 pub mod extended_select;
 pub mod redis_pool;
 pub mod websocket;
+pub mod shards;
 
 /*
     # Flow chart of the websocket part of this service

@@ -9,7 +9,6 @@ pub mod hello;
 pub mod error;
 pub mod join_game;
 pub mod join_game_response;
-pub mod game_event;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(u8)]

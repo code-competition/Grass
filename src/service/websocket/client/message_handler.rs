@@ -81,6 +81,8 @@ impl ClientMessageHandler {
                         true,
                         join_game.game_id.clone(),
                         client.id.clone(),
+                        sockets.clone(),
+                        redis_pool.clone(),
                     ));
                     client.send_model(DefaultModel::new(JoinGameResponse {
                         game_id: join_game.game_id,
@@ -99,10 +101,8 @@ impl ClientMessageHandler {
                         match &mut sockets.get_mut(&redis_game.host_id) {
                             Some(game_host_client) => {
                                 if let Some(game_host_client_game) = &mut game_host_client.game {
-                                    game_host_client_game.register(PartialClient {
-                                        id: client.id.clone(),
-                                        is_local: true,
-                                    });
+                                    game_host_client_game
+                                        .register(PartialClient::new(client.id.clone(), true));
                                 }
                             }
                             None => {

@@ -1,9 +1,22 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
+use dashmap::DashMap;
+use r2d2::Pool;
 use uuid::Uuid;
 
-use self::partial_client::PartialClient;
+use crate::service::redis_pool::RedisConnectionManager;
 
+use self::{
+    models::{shutdown::ShutdownGameEvent, GameEvent, GameEventOpCode},
+    partial_client::PartialClient,
+};
+
+use super::{
+    models::{DefaultModel, OpCode},
+    SocketClient,
+};
+
+pub mod models;
 pub mod partial_client;
 pub mod redis_game;
 
@@ -18,16 +31,30 @@ pub struct Game {
 
     /// Only defined if the client is a host, this does not count the host
     connected_clients: Option<HashMap<Uuid, PartialClient>>,
+
+    /// List of all connected sockets
+    sockets: Arc<DashMap<Uuid, SocketClient>>,
+
+    /// Redis pool
+    redis_pool: Pool<RedisConnectionManager>,
 }
 
 impl Game {
-    pub fn new(is_host: bool, game_id: String, host_id: Uuid) -> Game {
+    pub fn new(
+        is_host: bool,
+        game_id: String,
+        host_id: Uuid,
+        sockets: Arc<DashMap<Uuid, SocketClient>>,
+        redis_pool: Pool<RedisConnectionManager>,
+    ) -> Game {
         let connected_clients = if is_host { Some(HashMap::new()) } else { None };
         Game {
             is_host,
             game_id,
             host_id,
             connected_clients,
+            sockets,
+            redis_pool,
         }
     }
 
@@ -43,5 +70,29 @@ impl Game {
     /// Force shutdown the game
     pub fn shutdown(&mut self) {
         // Send quit message to all connected clients or only to the host
+        if !self.is_host {
+            return;
+        }
+
+        for client in self.connected_clients.as_ref().unwrap().iter() {
+            let partial = client.1;
+            let res = partial.send_message(
+                DefaultModel::new(GameEvent::new(
+                    Some(ShutdownGameEvent {
+                        game_id: self.game_id.clone(),
+                    }),
+                    models::GameEventOpCode::Shutdown,
+                )),
+                Some(&self.sockets),
+                &self.redis_pool,
+            );
+
+            match res {
+                Ok(_) => (),
+                Err(e) => {
+                    error!("Critical error when ending game {}", e);
+                }
+            }
+        }
     }
 }
