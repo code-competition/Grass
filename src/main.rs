@@ -3,8 +3,8 @@ use service::Service;
 #[macro_use]
 extern crate log;
 
-mod service;
 mod middleware;
+mod service;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -20,5 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut service = Service::new(&shard_id, "0.0.0.0:5000", "redis://127.0.0.1").await;
 
     // Run until finished
-    service.run(middleware::shard_payload_interceptor::<String>).await
+    service
+        .run(middleware::shard_payload_interceptor::<String>)
+        .await
 }

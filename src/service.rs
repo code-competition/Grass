@@ -3,7 +3,7 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use futures::channel::oneshot::{Receiver, Sender};
 use r2d2::Pool;
-use redis::{ControlFlow, PubSubCommands};
+use redis::{ControlFlow, PubSubCommands, Commands};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -16,6 +16,8 @@ pub mod extended_select;
 pub mod redis_pool;
 pub mod websocket;
 pub mod shards;
+
+pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
 
 /*
     # Flow chart of the websocket part of this service
@@ -39,7 +41,7 @@ pub struct Service<'a> {
     redis_addr: &'a str,
 
     // List of open socket connections
-    connections: Arc<DashMap<Uuid, SocketClient>>,
+    connections: Sockets,
 
     // Redis connection pool
     redis_pool: Pool<RedisConnectionManager>,
@@ -74,7 +76,7 @@ impl<'a> Service<'a> {
 
     pub async fn run<T>(
         &mut self,
-        middleware: fn(Arc<DashMap<Uuid, SocketClient>>, T),
+        middleware: fn(Sockets, T),
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         T: redis::FromRedisValue + 'static,
@@ -84,6 +86,10 @@ impl<'a> Service<'a> {
         let socket_connections = self.connections.clone();
         let shard_id = self.shard_id.to_string();
         let host_addr = self.host_addr.to_string();
+
+        // ! DEBUG CODE
+        let _: () = redis_pool.get().unwrap().set("GAME:monkey", "").unwrap();
+        // ! DEBUG CODE
 
         // Spawns websocket server task which handles all incoming tokio-tungstenite connections
         // And redirects them into the function websocket::accept_connection(...)

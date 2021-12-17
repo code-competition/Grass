@@ -1,14 +1,13 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use crossbeam::channel::{SendError, Sender};
-use dashmap::DashMap;
 use r2d2::Pool;
 use redis::Commands;
 use serde_json::Value;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
-use crate::service::redis_pool::RedisConnectionManager;
+use crate::service::{redis_pool::RedisConnectionManager, Sockets};
 
 use self::{
     game::Game,
@@ -54,7 +53,7 @@ impl SocketClient {
     /// Triggered when connection is closing
     pub fn on_close(&mut self) {
         if let Some(game) = &mut self.game {
-            game.shutdown();
+            let _ = game.shutdown();
         }
     }
 
@@ -86,7 +85,7 @@ impl SocketClient {
         redis_pool: Pool<RedisConnectionManager>,
         message: Message,
         shard_id: &str,
-        sockets: Arc<DashMap<Uuid, SocketClient>>,
+        sockets: Sockets,
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut should_close = false;
         match message {
@@ -97,10 +96,10 @@ impl SocketClient {
                     serde_json::from_str(&text);
                 match model {
                     Ok(model) => {
-                        println!("{:?}", (model));
                         if let Err(e) = ClientMessageHandler::handle_message(
                             self, sockets, redis_pool, model, shard_id,
                         ) {
+                            error!("Error while handling message {}", e);
                             should_close = true;
                         }
                     }

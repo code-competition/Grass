@@ -1,6 +1,3 @@
-use std::sync::Arc;
-
-use dashmap::DashMap;
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -8,7 +5,8 @@ use uuid::Uuid;
 use crate::service::{
     redis_pool::RedisConnectionManager,
     shards::{self, communication::ShardOpCode},
-    websocket::client::{models::DefaultModel, SocketClient},
+    websocket::client::models::DefaultModel,
+    Sockets,
 };
 
 #[derive(Debug, Clone)]
@@ -28,7 +26,7 @@ impl PartialClient {
     pub fn send_message<'a, T>(
         &self,
         message: DefaultModel<T>,
-        sockets: Option<&Arc<DashMap<Uuid, SocketClient>>>,
+        sockets: Option<&Sockets>,
         redis_pool: &Pool<RedisConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>>
     where

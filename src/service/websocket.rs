@@ -1,21 +1,17 @@
-use std::sync::Arc;
-
-use dashmap::DashMap;
 use futures::{future, SinkExt, StreamExt, TryStreamExt};
 use r2d2::Pool;
 use tokio::net::TcpStream;
-use uuid::Uuid;
 
 use self::client::SocketClient;
 
-use super::redis_pool::RedisConnectionManager;
+use super::{redis_pool::RedisConnectionManager, Sockets};
 
 pub mod client;
 
 pub async fn accept_connection(
     stream: TcpStream,
     redis_pool: Pool<RedisConnectionManager>,
-    sockets: Arc<DashMap<Uuid, SocketClient>>,
+    sockets: Sockets,
     shard_id: String,
 ) {
     // Get ip address of peer
@@ -62,6 +58,7 @@ pub async fn accept_connection(
                 )) {
                     Ok(should_close) => {
                         if should_close {
+                            trace!("Reached an should_close point, disconnecting socket.");
                             return future::err(
                                 tokio_tungstenite::tungstenite::Error::ConnectionClosed,
                             );
@@ -82,7 +79,7 @@ pub async fn accept_connection(
     // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
     let write_channel = tokio::spawn(async move {
         loop {
-            trace!("Ready to receive message from channel");
+            trace!("Ready to receive message from internal write channel");
             match receiver.recv() {
                 Ok(message) => match write.send(message).await {
                     Ok(_) => {

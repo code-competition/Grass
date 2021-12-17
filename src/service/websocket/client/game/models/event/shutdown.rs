@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize};
+use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShutdownGame {
+pub struct ShutdownGameEvent {
     pub(crate) game_id: String,
 }
