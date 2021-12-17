@@ -18,6 +18,8 @@ use crate::service::{
 
 use self::partial_client::PartialClient;
 
+use super::SocketClient;
+
 pub mod models;
 pub mod partial_client;
 pub mod redis_game;
@@ -87,10 +89,13 @@ impl Game {
     }
 
     /// Force shutdown the game
-    pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub fn shutdown(
+        &mut self,
+        client: Option<&SocketClient>,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Send quit message to all connected clients or only to the host
         if !self.is_host {
-            if let Some(client) = self.sockets.get(&self.client_id) {
+            if let Some(client) = client {
                 client.send_model(DefaultModel::new(Response::new(
                     Some(ShutdownResponse {
                         game_id: None,
@@ -129,7 +134,7 @@ impl Game {
         self.shutdown = true;
 
         // Send final goodbye to the host
-        if let Some(client) = self.sockets.get(&self.client_id) {
+        if let Some(client) = client {
             client.send_model(DefaultModel::new(Response::new(
                 Some(ShutdownResponse {
                     game_id: Some(self.game_id.clone()),
@@ -154,7 +159,7 @@ impl Drop for Game {
             .expect("could not remove game from redis");
 
         if !self.shutdown {
-            let _ = self.shutdown();
+            let _ = self.shutdown(None);
         }
     }
 }

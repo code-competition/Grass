@@ -66,9 +66,6 @@ pub async fn accept_connection(
                     }
                     Err(e) => {
                         error!("Failed to parse message socket: {}", e);
-                        return future::err(
-                            tokio_tungstenite::tungstenite::Error::ConnectionClosed,
-                        );
                     }
                 }
             }

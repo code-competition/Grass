@@ -3,19 +3,21 @@ use std::sync::Arc;
 use dashmap::DashMap;
 use futures::channel::oneshot::{Receiver, Sender};
 use r2d2::Pool;
-use redis::{ControlFlow, PubSubCommands, Commands};
+use redis::{Commands, ControlFlow, PubSubCommands};
+use serde::Deserialize;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
 use self::{
-    error::CriticalError, redis_pool::RedisConnectionManager, websocket::client::SocketClient,
+    error::CriticalError, redis_pool::RedisConnectionManager,
+    shards::communication::ShardDefaultModel, websocket::client::SocketClient,
 };
 
 pub mod error;
 pub mod extended_select;
 pub mod redis_pool;
-pub mod websocket;
 pub mod shards;
+pub mod websocket;
 
 pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
 
@@ -74,13 +76,10 @@ impl<'a> Service<'a> {
         }
     }
 
-    pub async fn run<T>(
+    pub async fn run(
         &mut self,
-        middleware: fn(Sockets, T),
-    ) -> Result<(), Box<dyn std::error::Error>>
-    where
-        T: redis::FromRedisValue + 'static,
-    {
+        middleware: fn(Sockets, ShardDefaultModel),
+    ) -> Result<(), Box<dyn std::error::Error>> {
         // Create a seperate thread for WebSockets
         let redis_pool = self.redis_pool.clone();
         let socket_connections = self.connections.clone();
@@ -129,12 +128,15 @@ impl<'a> Service<'a> {
             // Subscribe to presence channel and receive messages from other shards (socket servers)
             let _: () = con
                 .subscribe(&[shard_id], |msg| {
-                    let payload: T = msg
+                    let payload: Vec<u8> = msg
                         .get_payload()
                         .expect("could not get pub/sub message payload");
 
+                    let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
+                    let model = ShardDefaultModel::deserialize(payload).unwrap();
+
                     // Call middleware function and pass in the payload
-                    middleware(socket_connections.clone(), payload);
+                    middleware(socket_connections.clone(), model);
 
                     ControlFlow::Continue
                 })
@@ -144,8 +146,12 @@ impl<'a> Service<'a> {
         // This custom select function exits when one of the futures returns,
         // In case of a critical error the service will exit (error_rx)
         // and the option it returns will contain the CriticalError
-        let critical_error =
-            extended_select::select(joinhandle_ws, joinhandle_presence, self.error_channel.1.take().unwrap()).await;
+        let critical_error = extended_select::select(
+            joinhandle_ws,
+            joinhandle_presence,
+            self.error_channel.1.take().unwrap(),
+        )
+        .await;
         match critical_error {
             Some(error) => {
                 match error {

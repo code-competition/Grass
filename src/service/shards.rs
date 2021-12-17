@@ -19,9 +19,13 @@ pub fn send_redis<'a, T>(
 where
     T: Serialize + Deserialize<'a>,
 {
+    // Serialize message with flexbuffers
+    let mut flex_serializer = flexbuffers::FlexbufferSerializer::new();
+    message.serialize(&mut flex_serializer).unwrap();
+
     let message = ShardDefaultModel {
         op: opcode,
-        d: Some(message),
+        d: Some(flex_serializer.view().to_vec()),
     };
 
     // fetch redis connection from redis pool

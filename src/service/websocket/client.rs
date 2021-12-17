@@ -52,8 +52,8 @@ impl SocketClient {
 
     /// Triggered when connection is closing
     pub fn on_close(&mut self) {
-        if let Some(game) = &mut self.game {
-            let _ = game.shutdown();
+        if let Some(mut game) = self.game.take() {
+            let _ = game.shutdown(Some(self));
         }
     }
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use r2d2::Pool;
 use redis::Commands;
 use serde::{Deserialize, Serialize};
@@ -136,10 +138,10 @@ impl Request {
                 }
 
                 let shutdown_game: ShutdownRequest = serde_json::from_value(self.d.unwrap())?;
-                if let Some(game) = &mut client.game {
+                if let Some(mut game) = client.game.take() {
                     if game.game_id == shutdown_game.game_id {
                         trace!("Shutting down game");
-                        game.shutdown()?;
+                        game.shutdown(Some(client))?;
                     } else {
                         trace!("Receieved invalid game_id from client");
                         return Err(Box::new(Error {
@@ -147,7 +149,6 @@ impl Request {
                         }));
                     }
                 }
-                client.game = None;
             }
         }
 
