@@ -9,14 +9,19 @@ pub mod hello;
 pub mod error;
 pub mod join_game;
 pub mod join_game_response;
+pub mod shutdown_game;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, TryFromPrimitive)]
 #[repr(u8)]
 pub enum OpCode {
     Hello = 0,
     Error = 1,
+    
+    // Todo: Move into GameEvent struct
     JoinGame = 2,
     JoinGameResponse = 3,
+    ShutdownGame = 5,
+
     GameEvent = 4
 }
 

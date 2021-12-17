@@ -12,7 +12,7 @@ use crate::service::redis_pool::RedisConnectionManager;
 
 use self::{
     game::Game,
-    models::{DefaultModel, hello::Hello, error::Error},
+    models::{error::Error, hello::Hello, DefaultModel},
 };
 use message_handler::ClientMessageHandler;
 
@@ -97,9 +97,10 @@ impl SocketClient {
                     serde_json::from_str(&text);
                 match model {
                     Ok(model) => {
-                        if let Err(_) =
-                            ClientMessageHandler::handle_message(self, sockets, redis_pool, model, shard_id)
-                        {
+                        println!("{:?}", (model));
+                        if let Err(e) = ClientMessageHandler::handle_message(
+                            self, sockets, redis_pool, model, shard_id,
+                        ) {
                             should_close = true;
                         }
                     }

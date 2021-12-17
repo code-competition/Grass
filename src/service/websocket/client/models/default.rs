@@ -18,8 +18,4 @@ impl<T> DefaultModel<T> {
 
         DefaultModel { op, d: Some(d) }
     }
-
-    pub fn new_raw(d: T, op: OpCode) -> Self {
-        DefaultModel { op, d: Some(d) }
-    }
 }

@@ -11,10 +11,7 @@ use self::{
     partial_client::PartialClient,
 };
 
-use super::{
-    models::{DefaultModel, OpCode},
-    SocketClient,
-};
+use super::{models::DefaultModel, SocketClient};
 
 pub mod models;
 pub mod partial_client;
@@ -23,14 +20,14 @@ pub mod redis_game;
 #[derive(Debug, Clone)]
 pub struct Game {
     /// If the user is host then it will have all available permissions
-    is_host: bool,
-    game_id: String,
+    pub(crate) is_host: bool,
+    pub(crate) game_id: String,
 
     // Host client id, used for communication across clients
-    host_id: Uuid,
+    pub(crate) host_id: Uuid,
 
     /// Only defined if the client is a host, this does not count the host
-    connected_clients: Option<HashMap<Uuid, PartialClient>>,
+    pub(crate) connected_clients: Option<HashMap<Uuid, PartialClient>>,
 
     /// List of all connected sockets
     sockets: Arc<DashMap<Uuid, SocketClient>>,
@@ -68,12 +65,13 @@ impl Game {
     }
 
     /// Force shutdown the game
-    pub fn shutdown(&mut self) {
+    pub fn shutdown(&self) {
         // Send quit message to all connected clients or only to the host
         if !self.is_host {
             return;
         }
 
+        trace!("Host \"{}\" triggered a shutdown event", &self.host_id);
         for client in self.connected_clients.as_ref().unwrap().iter() {
             let partial = client.1;
             let res = partial.send_message(
@@ -81,7 +79,7 @@ impl Game {
                     Some(ShutdownGameEvent {
                         game_id: self.game_id.clone(),
                     }),
-                    models::GameEventOpCode::Shutdown,
+                    GameEventOpCode::Shutdown,
                 )),
                 Some(&self.sockets),
                 &self.redis_pool,

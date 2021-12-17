@@ -15,7 +15,7 @@ use super::{
     game::redis_game::RedisGame,
     models::{
         error::Error, join_game::JoinGame, join_game_response::JoinGameResponse, DefaultModel,
-        OpCode,
+        OpCode, shutdown_game::ShutdownGame,
     },
     SocketClient,
 };
@@ -37,6 +37,8 @@ impl ClientMessageHandler {
                 err: "No data was sent with opcode",
             }));
         };
+
+        trace!("Receieved message from client, parsing it OpCode: {:?}", &model.op);
 
         match model.op {
             OpCode::JoinGame => {
@@ -93,7 +95,6 @@ impl ClientMessageHandler {
                     // Should join an already existing game through the shard communication protocol (redis)
                     // Or by doing it locally, if the game is hosted on the same server as the socket client
                     let redis_game: RedisGame = serde_json::from_str(&game).unwrap();
-                    println!("{:?}", (redis_game));
 
                     // Check if game is on the same server
                     if redis_game.shard_id == shard_id {
@@ -112,10 +113,23 @@ impl ClientMessageHandler {
                             }
                         }
                     } else {
-                        // Register player on another shard through pub/sub redis
+                        // TODO: Register player on another shard through pub/sub redis
                     }
                 }
-            }
+            },
+            OpCode::ShutdownGame => {
+                let shutdown_game: ShutdownGame = serde_json::from_value(data)?;
+                if let Some(game) = &client.game {
+                    if game.game_id == shutdown_game.game_id {
+                        trace!("Shutting down game");
+                        game.shutdown();
+                    }
+
+                    trace!("Receieved invalid game_id from client");
+                }
+                // Todo: unregister from redis
+                client.game = None;
+            },
             _ => {
                 return Err(Box::new(Error {
                     err: "Invalid receieve opcode",
@@ -123,7 +137,6 @@ impl ClientMessageHandler {
             }
         }
 
-        // Returning true will close the connection and returning false will keep it open
         Ok(())
     }
 }
