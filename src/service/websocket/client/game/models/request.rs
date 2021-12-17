@@ -148,6 +148,10 @@ impl Request {
                             err: "Receieved invalid game_id from client",
                         }));
                     }
+                } else {
+                    return Err(Box::new(Error {
+                        err: "Client was not in a game",
+                    }));
                 }
             }
         }
