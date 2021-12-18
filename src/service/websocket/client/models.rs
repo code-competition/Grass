@@ -4,7 +4,6 @@ pub use default::DefaultModel;
 
 // All models are derived from default
 pub mod default;
-pub mod error;
 pub mod hello;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

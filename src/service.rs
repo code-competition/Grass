@@ -78,7 +78,7 @@ impl<'a> Service<'a> {
 
     pub async fn run(
         &mut self,
-        middleware: fn(Sockets, ShardDefaultModel),
+        middleware: fn(Sockets, Pool<RedisConnectionManager>, ShardDefaultModel),
     ) -> Result<(), Box<dyn std::error::Error>> {
         // Create a seperate thread for WebSockets
         let redis_pool = self.redis_pool.clone();
@@ -93,6 +93,7 @@ impl<'a> Service<'a> {
         // Spawns websocket server task which handles all incoming tokio-tungstenite connections
         // And redirects them into the function websocket::accept_connection(...)
         // TCP system works with tokio-tungstenite through tokios TcpListener
+        let pool = redis_pool.clone();
         let joinhandle_ws = tokio::spawn(async move {
             trace!("Launching socket shard");
             let try_socket = TcpListener::bind(&host_addr).await;
@@ -102,7 +103,7 @@ impl<'a> Service<'a> {
             while let Ok((stream, _)) = listener.accept().await {
                 tokio::spawn(websocket::accept_connection(
                     stream,
-                    redis_pool.clone(),
+                    pool.clone(),
                     socket_connections.clone(),
                     shard_id.to_string(),
                 ));
@@ -116,6 +117,7 @@ impl<'a> Service<'a> {
 
         // Create a seperate thread for PubSub channels
         // Spawns the tokio task that handles all incoming messages from redis
+        let pool = redis_pool.clone();
         let joinhandle_presence = tokio::spawn(async move {
             // Opens a new redis connection outside the pool to leverage better connection speeds
             let client = redis::Client::open(redis_addr).expect("redis connection failed");
@@ -132,11 +134,12 @@ impl<'a> Service<'a> {
                         .get_payload()
                         .expect("could not get pub/sub message payload");
 
+                    // Todo: error handling
                     let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
                     let model = ShardDefaultModel::deserialize(payload).unwrap();
 
                     // Call middleware function and pass in the payload
-                    middleware(socket_connections.clone(), model);
+                    middleware(socket_connections.clone(), pool.clone(), model);
 
                     ControlFlow::Continue
                 })

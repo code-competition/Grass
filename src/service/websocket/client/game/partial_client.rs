@@ -39,7 +39,7 @@ impl PartialClient {
         } else {
             shards::send_redis(
                 &redis_pool,
-                self.id,
+                (Some(self.id), None),
                 message,
                 ShardOpCode::SendAsDefaultModelToClient,
             )?;

@@ -2,11 +2,13 @@ use r2d2::Pool;
 use serde_json::Value;
 
 use crate::service::{
-    redis_pool::RedisConnectionManager, websocket::client::game::models::Request, Sockets,
+    redis_pool::RedisConnectionManager,
+    websocket::client::{error::ClientError, game::models::Request},
+    Sockets,
 };
 
 use super::{
-    models::{error::Error, DefaultModel, OpCode},
+    models::{DefaultModel, OpCode},
     SocketClient,
 };
 
@@ -23,9 +25,9 @@ impl ClientMessageHandler {
         let data = if let Some(data) = model.d {
             data
         } else {
-            return Err(Box::new(Error {
-                err: "No data was sent with opcode",
-            }));
+            return Err(Box::new(ClientError::NoDataWithOpCode(
+                "No data was sent with opcode",
+            )));
         };
 
         trace!(
@@ -40,9 +42,7 @@ impl ClientMessageHandler {
                 return request.handle_message(client, sockets, redis_pool, shard_id);
             }
             _ => {
-                return Err(Box::new(Error {
-                    err: "Invalid receieve opcode",
-                }));
+                return Err(Box::new(ClientError::InvalidOpCode));
             }
         }
     }

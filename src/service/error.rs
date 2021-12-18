@@ -1,4 +1,40 @@
-use std::{error::Error, fmt::{Display, Formatter}};
+use std::{
+    error::Error,
+    fmt::{Display, Formatter},
+};
+
+#[derive(Debug, Clone)]
+pub enum ServiceError {
+    CouldNotGetSocket,
+    GameDoesNotExist,
+    GameDoesNotMatch,
+    AlreadyInGame,
+}
+
+impl std::fmt::Display for ServiceError {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
+        #[allow(deprecated)]
+        match self.cause() {
+            Some(cause) => write!(fmt, "{}: {}", self.description(), cause),
+            None => write!(fmt, "{}", self.description()),
+        }
+    }
+}
+
+impl std::error::Error for ServiceError {
+    fn description(&self) -> &str {
+        #[allow(deprecated)]
+        match *self {
+            _ => ""
+        }
+    }
+
+    fn cause(&self) -> Option<&dyn std::error::Error> {
+        match *self {
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CriticalError {
@@ -8,9 +44,7 @@ pub struct CriticalError {
 impl CriticalError {
     #[allow(dead_code)]
     pub fn new(code: i32) -> Self {
-        CriticalError {
-            code,
-        }
+        CriticalError { code }
     }
 
     pub fn get_code(&self) -> i32 {

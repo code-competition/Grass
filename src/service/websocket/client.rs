@@ -10,23 +10,25 @@ use uuid::Uuid;
 use crate::service::{redis_pool::RedisConnectionManager, Sockets};
 
 use self::{
+    error::ClientError,
     game::Game,
-    models::{error::Error, hello::Hello, DefaultModel},
+    models::{hello::Hello, DefaultModel},
 };
 use message_handler::ClientMessageHandler;
 
-mod game;
-mod message_handler;
-mod models;
+pub mod error;
+pub mod game;
+pub mod message_handler;
+pub mod models;
 
 #[derive(Debug, Clone)]
 pub struct SocketClient {
-    id: Uuid,
+    pub(crate) id: Uuid,
     addr: SocketAddr,
     socket_channel: Sender<Message>,
 
     // Some(...) if user is in a game
-    game: Option<Game>,
+    pub(crate) game: Option<Game>,
 }
 
 impl SocketClient {
@@ -107,7 +109,9 @@ impl SocketClient {
                         error!("Client reached an error {:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
-                        self.send_error("Invalid model, closing connection.")?;
+                        self.send_error(ClientError::InvalidMessage(
+                            "Invalid model, closing connection.",
+                        ))?;
                     }
                 }
             }
@@ -127,8 +131,8 @@ impl SocketClient {
 
     /// Sends a error to the client
     #[inline]
-    pub fn send_error<'a>(&self, err: &'a str) -> Result<(), SendError<Message>> {
-        self.send_model(DefaultModel::new(Error { err }))
+    pub fn send_error<'a>(&self, err: ClientError) -> Result<(), SendError<Message>> {
+        self.send_model(DefaultModel::new(err))
     }
 
     /// Sends a model (JSON serializable object) to the client

@@ -9,9 +9,9 @@ mod service;
 
 #[derive(Deserialize, Debug)]
 struct Config {
-  address: String,
-  port: u16,
-  redis_addr: String,
+    address: String,
+    port: u16,
+    redis_addr: String,
 }
 
 #[tokio::main]
@@ -22,13 +22,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Env config
     let cfg = match envy::from_env::<Config>() {
         Ok(config) => config,
-        Err(_) => {
-            Config {
-                address: "0.0.0.0".into(),
-                port: 5000,
-                redis_addr: "redis://127.0.0.1".into()
-            }
-        }
+        Err(_) => Config {
+            address: "0.0.0.0".into(),
+            port: 5000,
+            redis_addr: "redis://127.0.0.1".into(),
+        },
     };
 
     // Generate random shard (container instance) id
@@ -40,7 +38,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut service = Service::new(&shard_id, &host_addr, &cfg.redis_addr).await;
 
     // Run until finished
-    service
-        .run(middleware::shard_payload_interceptor)
-        .await
+    service.run(middleware::shard_payload_interceptor).await
 }

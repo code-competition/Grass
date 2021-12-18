@@ -1,15 +1,24 @@
-use std::sync::Arc;
+use std::str::FromStr;
 
 use r2d2::Pool;
 use redis::Commands;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
+    shards::{
+        self,
+        communication::{
+            request::{join::ShardJoinRequest, ShardRequest, ShardRequestOpCode},
+            ShardOpCode,
+        },
+    },
     websocket::client::{
+        error::ClientError,
         game::{partial_client::PartialClient, redis_game::RedisGame, Game},
-        models::{error::Error, DefaultModel, OpCode, OpCodeFetcher},
+        models::{DefaultModel, OpCode, OpCodeFetcher},
         SocketClient,
     },
     Sockets,
@@ -40,9 +49,9 @@ impl Request {
         match self.op {
             RequestOpCode::Join => {
                 if self.d.is_none() {
-                    return Err(Box::new(Error {
-                        err: "Internal Server Error",
-                    }));
+                    return Err(Box::new(ClientError::InternalServerError(
+                        "Internal Server Error",
+                    )));
                 }
 
                 // Check if user is already in a game
@@ -50,6 +59,7 @@ impl Request {
                     return Ok(());
                 }
 
+                // Parse the join request
                 let join_game: JoinRequest = serde_json::from_value(self.d.unwrap())?;
 
                 // get a redis connection from the pool
@@ -57,9 +67,9 @@ impl Request {
                 let mut conn = match conn {
                     Ok(c) => c,
                     Err(_) => {
-                        return Err(Box::new(Error {
-                            err: "Internal Server Error",
-                        }));
+                        return Err(Box::new(ClientError::InternalServerError(
+                            "Internal Server Error",
+                        )));
                     }
                 };
 
@@ -69,14 +79,13 @@ impl Request {
                 let game = match game {
                     Ok(game) => game,
                     Err(_) => {
-                        return Err(Box::new(Error {
-                            err: "No game was found",
-                        }));
+                        return Err(Box::new(ClientError::NoGameWasFound));
                     }
                 };
 
                 // Check if the game has been initialized
                 if game == String::new() {
+                    // TODO: move redis game registration into a database handler structure
                     // Serialize game object data
                     let redis_game = RedisGame {
                         shard_id: shard_id.clone().to_string(),
@@ -96,6 +105,7 @@ impl Request {
                         sockets.clone(),
                         redis_pool.clone(),
                     ));
+
                     client.send_model(DefaultModel::new(Response::new(
                         Some(JoinResponse {
                             game_id: join_game.game_id,
@@ -120,21 +130,40 @@ impl Request {
                                 }
                             }
                             None => {
-                                return Err(Box::new(Error {
-                                    err: "Socket client does not exist",
-                                }));
+                                return Err(Box::new(ClientError::ClientDoesNotExist(
+                                    "Socket client does not exist",
+                                )));
                             }
                         }
                     } else {
-                        // TODO: Register player on another shard through pub/sub redis
+                        info!("Game is on another shard, need to register there");
+
+                        // Serialize request
+                        let request = ShardRequest::new(
+                            ShardJoinRequest {
+                                game_id: join_game.game_id,
+                                client_id: client.id,
+                                host_id: redis_game.host_id,
+                                shard_id: Uuid::from_str(&redis_game.shard_id)?,
+                            },
+                            ShardRequestOpCode::Join,
+                        );
+
+                        // Send request to shard
+                        shards::send_redis(
+                            &redis_pool,
+                            (None, Some(Uuid::from_str(&redis_game.shard_id)?)),
+                            request,
+                            ShardOpCode::Request,
+                        )?;
                     }
                 }
             }
             RequestOpCode::Shutdown => {
                 if self.d.is_none() {
-                    return Err(Box::new(Error {
-                        err: "Internal Server Error",
-                    }));
+                    return Err(Box::new(ClientError::InternalServerError(
+                        "Internal Server Error",
+                    )));
                 }
 
                 let shutdown_game: ShutdownRequest = serde_json::from_value(self.d.unwrap())?;
@@ -144,14 +173,12 @@ impl Request {
                         game.shutdown(Some(client))?;
                     } else {
                         trace!("Receieved invalid game_id from client");
-                        return Err(Box::new(Error {
-                            err: "Receieved invalid game_id from client",
-                        }));
+                        return Err(Box::new(ClientError::InvalidGameID));
                     }
                 } else {
-                    return Err(Box::new(Error {
-                        err: "Client was not in a game",
-                    }));
+                    return Err(Box::new(ClientError::ClientIsNotInAGame(
+                        "Client was not in a game",
+                    )));
                 }
             }
         }
