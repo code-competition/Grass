@@ -53,7 +53,7 @@ impl ShardResponse {
 
                 // Register the game on the client
                 let socket = sockets
-                    .get_mut(&shard_join_game.host_id);
+                    .get_mut(&shard_join_game.client_id);
                 let mut socket = match socket {
                     Some(socket) => socket,
                     None => {

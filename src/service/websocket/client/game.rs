@@ -75,7 +75,17 @@ impl Game {
     pub fn register(&mut self, partial_client: PartialClient) {
         // Cancel if user is not game host
         if let Some(connected_clients) = &mut self.connected_clients {
-            debug!("Register client {:?}", (&partial_client));
+            trace!("Registering client {} in game", partial_client.id);
+            for client in connected_clients.iter() {
+                let _ = client.1.send_message(
+                    DefaultModel::new(crate::service::websocket::client::models::hello::Hello {
+                        id: Uuid::new_v4(),
+                    }),
+                    Some(&self.sockets),
+                    &self.redis_pool,
+                );
+            }
+
             connected_clients.insert(partial_client.id.clone(), partial_client);
         }
     }

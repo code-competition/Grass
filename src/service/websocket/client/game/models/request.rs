@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
-    shards::{
+    sharding::{
         self,
         communication::{
             request::{join::ShardJoinRequest, ShardRequest, ShardRequestOpCode},
@@ -125,8 +125,28 @@ impl Request {
                         match &mut sockets.get_mut(&redis_game.host_id) {
                             Some(game_host_client) => {
                                 if let Some(game_host_client_game) = &mut game_host_client.game {
+                                    // Register the local client in the host game
                                     game_host_client_game
                                         .register(PartialClient::new(client.id.clone(), true));
+
+                                    // Register the game for the client
+                                    client.game = Some(Game::new(
+                                        false,
+                                        join_game.game_id.clone(),
+                                        client.id.clone(),
+                                        redis_game.host_id.clone(),
+                                        sockets.clone(),
+                                        redis_pool.clone(),
+                                    ));
+
+                                    client.send_model(DefaultModel::new(Response::new(
+                                        Some(JoinResponse {
+                                            game_id: join_game.game_id,
+                                            is_host: false,
+                                            success: true,
+                                        }),
+                                        ResponseOpCode::Join,
+                                    )))?;
                                 }
                             }
                             None => {
@@ -150,7 +170,7 @@ impl Request {
                         );
 
                         // Send request to shard
-                        shards::send_redis(
+                        sharding::send_redis(
                             &redis_pool,
                             (None, Some(Uuid::from_str(&redis_game.shard_id)?)),
                             request,

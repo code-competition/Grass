@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
-    shards::{self, communication::ShardOpCode},
+    sharding::{self, communication::ShardOpCode},
     websocket::client::models::DefaultModel,
     Sockets,
 };
@@ -34,14 +34,16 @@ impl PartialClient {
     {
         if self.is_local {
             if let Some(sockets) = sockets {
+                warn!("dead lock");
                 sockets.get(&self.id).unwrap().send_model(message)?;
+                warn!("dead lock not");
             }
         } else {
-            shards::send_redis(
+            sharding::send_redis(
                 &redis_pool,
                 (Some(self.id), None),
                 message,
-                ShardOpCode::SendAsDefaultModelToClient,
+                ShardOpCode::SendAsDefaultModelToClient(self.id),
             )?;
         }
 

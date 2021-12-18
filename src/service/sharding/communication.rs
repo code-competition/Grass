@@ -40,10 +40,10 @@ impl ShardDefaultModel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ShardOpCode {
-    SendAsDefaultModelToClient = 0,
-    GameEvent = 1,
-    Request = 2,
-    Response = 3,
+    SendAsDefaultModelToClient(Uuid),
+    GameEvent,
+    Request,
+    Response,
 }
 
 pub trait ShardOpCodeFetcher {

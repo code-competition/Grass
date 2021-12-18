@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::service::{
     error::ServiceError, redis_pool::RedisConnectionManager,
-    websocket::client::game::partial_client::PartialClient, Sockets, shards,
+    websocket::client::game::partial_client::PartialClient, Sockets, sharding,
 };
 
 use self::join::ShardJoinRequest;
@@ -78,7 +78,7 @@ impl ShardRequest {
                 );
 
                 // Send response to shard
-                shards::send_redis(
+                sharding::send_redis(
                     &redis_pool,
                     (Some(shard_join_game.client_id), None),
                     response,

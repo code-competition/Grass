@@ -3,7 +3,7 @@ use redis::Commands;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use self::communication::{ShardDefaultModel, ShardOpCode, ShardOpCodeFetcher};
+use self::communication::{ShardDefaultModel, ShardOpCode};
 
 use super::redis_pool::RedisConnectionManager;
 
@@ -18,7 +18,7 @@ pub fn send_redis<'a, T>(
     opcode: ShardOpCode,
 ) -> Result<(), Box<dyn std::error::Error>>
 where
-    T: ShardOpCodeFetcher + Serialize + Deserialize<'a>,
+    T: Serialize + Deserialize<'a>,
 {
     let message = ShardDefaultModel::new(message, opcode);
 

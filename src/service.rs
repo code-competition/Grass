@@ -10,13 +10,13 @@ use uuid::Uuid;
 
 use self::{
     error::CriticalError, redis_pool::RedisConnectionManager,
-    shards::communication::ShardDefaultModel, websocket::client::SocketClient,
+    sharding::communication::ShardDefaultModel, websocket::client::SocketClient,
 };
 
 pub mod error;
 pub mod extended_select;
 pub mod redis_pool;
-pub mod shards;
+pub mod sharding;
 pub mod websocket;
 
 pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
@@ -33,7 +33,7 @@ pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
                                                      │
     ┌───────── register user in database ◄───────────┘
     │
-    └────► on received from other shards ────► send to middleware
+    └────► on received from other sharding ────► send to middleware
 */
 
 pub struct Service<'a> {
@@ -127,7 +127,7 @@ impl<'a> Service<'a> {
 
             info!("shard id registered to pub/sub: {}", shard_id);
 
-            // Subscribe to presence channel and receive messages from other shards (socket servers)
+            // Subscribe to presence channel and receive messages from other sharding (socket servers)
             let _: () = con
                 .subscribe(&[shard_id], |msg| {
                     let payload: Vec<u8> = msg

@@ -1,7 +1,5 @@
 use serde_derive::{Deserialize, Serialize};
 
-use crate::service::shards::communication::{ShardOpCode, ShardOpCodeFetcher};
-
 use super::{OpCode, OpCodeFetcher};
 
 // Model is to be converted into JSON when serialized before sending to clients
@@ -19,11 +17,5 @@ impl<T> DefaultModel<T> {
         let op = T::op_code();
 
         DefaultModel { op, d: Some(d) }
-    }
-}
-
-impl<T> ShardOpCodeFetcher for DefaultModel<T> {
-    fn op_code() -> ShardOpCode {
-        ShardOpCode::SendAsDefaultModelToClient
     }
 }
