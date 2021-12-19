@@ -3,6 +3,7 @@ use serde::{Serialize, Deserialize};
 use crate::service::websocket::client::models::{OpCodeFetcher, OpCode};
 
 pub mod join;
+pub mod leave;
 pub mod shutdown;
 
 // Models for responses
@@ -21,6 +22,7 @@ impl<T> Response<T> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum ResponseOpCode {
     Join,
+    Leave,
     Shutdown,
 }
 

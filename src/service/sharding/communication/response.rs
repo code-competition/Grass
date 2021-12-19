@@ -7,7 +7,10 @@ use crate::service::{
     websocket::client::{
         error::ClientError,
         game::{
-            models::{response::join::JoinResponse, Response, ResponseOpCode},
+            models::{
+                response::{join::JoinResponse, leave::LeaveResponse},
+                Response, ResponseOpCode,
+            },
             partial_client::PartialClient,
             Game,
         },
@@ -18,9 +21,10 @@ use crate::service::{
 
 use self::join::ShardJoinResponse;
 
-use super::{ShardOpCode, ShardOpCodeFetcher};
+use super::{request::leave::ShardLeaveRequest, ShardOpCode, ShardOpCodeFetcher};
 
 pub mod join;
+pub mod leave;
 
 // Models for response
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,10 +64,10 @@ impl ShardResponse {
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self.op {
             ShardResponseOpCode::Join => {
-                let shard_join_game = self.data::<ShardJoinResponse>();
+                let response = self.data::<ShardJoinResponse>();
 
                 // Register the game on the client
-                let socket = sockets.get_mut(&shard_join_game.client_id);
+                let socket = sockets.get_mut(&response.client_id);
                 let mut socket = match socket {
                     Some(socket) => socket,
                     None => {
@@ -72,26 +76,66 @@ impl ShardResponse {
                 };
                 if socket.game.is_some() {
                     socket.send_error(ClientError::AlreadyInGame("Client is already in a game"))?;
-                    return Err(Box::new(ClientError::AlreadyInGame("Client was for some stupid reason already in a game")));
+                    return Err(Box::new(ClientError::AlreadyInGame(
+                        "Client was for some stupid reason already in a game",
+                    )));
                 }
 
                 // Client successfully joined the game, give the client its game object
                 socket.game = Some(Game::new(
                     false,
-                    shard_join_game.game_id.clone(),
-                    shard_join_game.client_id,
-                    PartialClient::new(shard_join_game.host_id, false, None),
-                    sockets.clone(),
+                    response.game_id.clone(),
+                    PartialClient::new(
+                        response.client_id,
+                        response.shard_id.to_string(),
+                        true,
+                        Some(socket.socket_channel.clone()),
+                    ),
+                    PartialClient::new(
+                        response.host_id,
+                        response.shard_id.to_string(),
+                        false,
+                        None,
+                    ),
                     redis_pool.clone(),
+                    sockets.clone(),
                 ));
 
                 socket.send_model(DefaultModel::new(Response::new(
                     Some(JoinResponse {
-                        game_id: shard_join_game.game_id,
+                        game_id: response.game_id,
                         is_host: false,
                         success: true,
                     }),
                     ResponseOpCode::Join,
+                )))?;
+            }
+            ShardResponseOpCode::Leave => {
+                let response = self.data::<ShardLeaveRequest>();
+
+                // Register the game on the client
+                let socket = sockets.get_mut(&response.client_id);
+                let mut socket = match socket {
+                    Some(socket) => socket,
+                    None => {
+                        return Err(Box::new(ServiceError::CouldNotGetSocket));
+                    }
+                };
+                if socket.game.is_none() {
+                    socket.send_error(ClientError::NotInGame("Client is not in a game"))?;
+                    return Err(Box::new(ClientError::NotInGame(
+                        "Client was for some stupid reason not in a game",
+                    )));
+                }
+
+                socket.game = None;
+
+                socket.send_model(DefaultModel::new(Response::new(
+                    Some(LeaveResponse {
+                        game_id: response.game_id,
+                        success: true,
+                    }),
+                    ResponseOpCode::Leave,
                 )))?;
             }
         };
@@ -109,4 +153,5 @@ impl ShardOpCodeFetcher for ShardResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ShardResponseOpCode {
     Join,
+    Leave,
 }

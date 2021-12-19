@@ -16,6 +16,9 @@ use crate::service::{
 pub struct PartialClient {
     pub(crate) id: Uuid,
 
+    /// The shard_id where the client is registered
+    pub(crate) shard_id: String,
+
     /// true if the player is local to the server\
     /// false if the player is on another shard
     pub(crate) is_local: bool,
@@ -25,9 +28,10 @@ pub struct PartialClient {
 }
 
 impl PartialClient {
-    pub fn new(id: Uuid, is_local: bool, write_channel: Option<Sender<Message>>) -> PartialClient {
+    pub fn new(id: Uuid, shard_id: String, is_local: bool, write_channel: Option<Sender<Message>>) -> PartialClient {
         PartialClient {
             id,
+            shard_id,
             is_local,
             write_channel,
         }

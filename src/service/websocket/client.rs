@@ -25,7 +25,7 @@ pub mod models;
 pub struct SocketClient {
     pub(crate) id: Uuid,
     addr: SocketAddr,
-    socket_channel: Sender<Message>,
+    pub(crate) socket_channel: Sender<Message>,
 
     // Some(...) if user is in a game
     pub(crate) game: Option<Game>,
@@ -55,7 +55,7 @@ impl SocketClient {
     /// Triggered when connection is closing
     pub fn on_close(&mut self) {
         if let Some(mut game) = self.game.take() {
-            let _ = game.shutdown(Some(self));
+            drop(game);
         }
     }
 

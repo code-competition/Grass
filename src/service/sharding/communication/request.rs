@@ -2,18 +2,19 @@ use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 
 use crate::service::{
-    error::ServiceError, redis_pool::RedisConnectionManager,
-    websocket::client::game::partial_client::PartialClient, Sockets, sharding,
+    error::ServiceError, redis_pool::RedisConnectionManager, sharding,
+    websocket::client::game::partial_client::PartialClient, Sockets,
 };
 
-use self::join::ShardJoinRequest;
+use self::{join::ShardJoinRequest, leave::ShardLeaveRequest};
 
 use super::{
-    response::{join::ShardJoinResponse, ShardResponse, ShardResponseOpCode},
+    response::{join::ShardJoinResponse, ShardResponse, ShardResponseOpCode, leave::ShardLeaveResponse},
     ShardOpCode, ShardOpCodeFetcher,
 };
 
 pub mod join;
+pub mod leave;
 
 // Models for requests
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,26 +54,25 @@ impl ShardRequest {
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self.op {
             ShardRequestOpCode::Join => {
-                let shard_join_game = self.data::<ShardJoinRequest>();
+                let request = self.data::<ShardJoinRequest>();
 
                 // Register the client on the host
                 let mut game_host = sockets
-                    .get_mut(&shard_join_game.host_id)
+                    .get_mut(&request.host_id)
                     .ok_or(ServiceError::CouldNotGetSocket)?;
                 let game = game_host
                     .game
                     .as_mut()
                     .ok_or(ServiceError::GameDoesNotExist)?;
-                game.register(PartialClient::new(shard_join_game.client_id, false, None));
-                drop(game_host);
+                game.register(PartialClient::new(request.client_id, request.shard_id.to_string(), false, None));
 
                 // Serialize response
                 let response = ShardResponse::new(
                     ShardJoinResponse {
-                        game_id: shard_join_game.game_id,
-                        host_id: shard_join_game.host_id,
-                        client_id: shard_join_game.client_id,
-                        shard_id: shard_join_game.shard_id,
+                        game_id: request.game_id,
+                        host_id: request.host_id,
+                        client_id: request.client_id,
+                        shard_id: request.shard_id,
                     },
                     ShardResponseOpCode::Join,
                 );
@@ -80,7 +80,39 @@ impl ShardRequest {
                 // Send response to shard
                 sharding::send_redis(
                     &redis_pool,
-                    (Some(shard_join_game.client_id), None),
+                    (Some(request.client_id), None),
+                    response,
+                    ShardOpCode::Response,
+                )?;
+            }
+            ShardRequestOpCode::Leave => {
+                let request = self.data::<ShardLeaveRequest>();
+
+                // Register the client on the host
+                let mut game_host = sockets
+                    .get_mut(&request.host_id)
+                    .ok_or(ServiceError::CouldNotGetSocket)?;
+                let game = game_host
+                    .game
+                    .as_mut()
+                    .ok_or(ServiceError::GameDoesNotExist)?;
+                game.unregister(&request.client_id);
+            
+                // Serialize response
+                let response = ShardResponse::new(
+                    ShardLeaveResponse {
+                        game_id: request.game_id,
+                        host_id: request.host_id,
+                        client_id: request.client_id,
+                        shard_id: request.shard_id,
+                    },
+                    ShardResponseOpCode::Leave,
+                );
+
+                // Send response to shard
+                sharding::send_redis(
+                    &redis_pool,
+                    (Some(request.client_id), None),
                     response,
                     ShardOpCode::Response,
                 )?;
@@ -100,4 +132,5 @@ impl ShardOpCodeFetcher for ShardRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ShardRequestOpCode {
     Join,
+    Leave,
 }
