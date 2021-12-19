@@ -1,12 +1,15 @@
+use std::time::Duration;
+
+use crossbeam::channel::Sender;
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
+use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
     sharding::{self, communication::ShardOpCode},
     websocket::client::models::DefaultModel,
-    Sockets,
 };
 
 #[derive(Debug, Clone)]
@@ -16,33 +19,38 @@ pub struct PartialClient {
     /// true if the player is local to the server\
     /// false if the player is on another shard
     pub(crate) is_local: bool,
+
+    /// Only available on local sockets, prevents deadlocking within games
+    pub(crate) write_channel: Option<Sender<Message>>,
 }
 
 impl PartialClient {
-    pub fn new(id: Uuid, is_local: bool) -> PartialClient {
-        PartialClient { id, is_local }
+    pub fn new(id: Uuid, is_local: bool, write_channel: Option<Sender<Message>>) -> PartialClient {
+        PartialClient {
+            id,
+            is_local,
+            write_channel,
+        }
     }
 
     pub fn send_message<'a, T>(
         &self,
         message: DefaultModel<T>,
-        sockets: Option<&Sockets>,
         redis_pool: &Pool<RedisConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         T: Serialize + Deserialize<'a>,
     {
         if self.is_local {
-            if let Some(sockets) = sockets {
-                warn!("dead lock");
-                sockets.get(&self.id).unwrap().send_model(message)?;
-                warn!("dead lock not");
-            }
+            self.write_channel.as_ref().unwrap().send_timeout(
+                Message::Text(serde_json::to_string(&message).unwrap()),
+                Duration::from_secs(2),
+            )?;
         } else {
             sharding::send_redis(
                 &redis_pool,
                 (Some(self.id), None),
-                message,
+                message.to_sharding(),
                 ShardOpCode::SendAsDefaultModelToClient(self.id),
             )?;
         }

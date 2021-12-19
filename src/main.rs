@@ -1,6 +1,8 @@
 use serde::Deserialize;
 use service::Service;
 
+use crate::service::MiddlewareManager;
+
 #[macro_use]
 extern crate log;
 
@@ -25,7 +27,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => Config {
             address: "0.0.0.0".into(),
             port: 5000,
-            redis_addr: "redis://127.0.0.1".into(),
+            redis_addr: "redis://127.0.0.1:5374".into(),
         },
     };
 
@@ -38,5 +40,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut service = Service::new(&shard_id, &host_addr, &cfg.redis_addr).await;
 
     // Run until finished
-    service.run(middleware::shard_payload_interceptor).await
+    let middleware = MiddlewareManager::new(middleware::shard_payload_interceptor);
+    service.run(middleware).await
 }

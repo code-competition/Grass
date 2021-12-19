@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 
 use r2d2::Pool;
-use redis::Commands;
 use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
     websocket::client::{
         game::models::{
-            event::shutdown::ShutdownGameEvent, response::shutdown::ShutdownResponse, GameEvent,
-            GameEventOpCode, Response,
+            event::{connected_client::ConnectedClientGameEvent, shutdown::ShutdownGameEvent},
+            response::shutdown::ShutdownResponse,
+            GameEvent, Response,
         },
         models::DefaultModel,
     },
@@ -33,13 +33,14 @@ pub struct Game {
     pub(crate) is_host: bool,
     pub(crate) game_id: String,
 
-    // Host client id, used for communication across clients
-    pub(crate) host_id: Uuid,
+    // Partial host, used for communication across clients
+    pub(crate) partial_host: PartialClient,
 
     /// Only defined if the client is a host, this does not count the host
     pub(crate) connected_clients: Option<HashMap<Uuid, PartialClient>>,
 
     /// List of all connected sockets
+    /// ! Extreme warning for deadlocks, shouldn't be used!
     sockets: Sockets,
 
     /// Redis pool
@@ -54,7 +55,7 @@ impl Game {
         is_host: bool,
         game_id: String,
         client_id: Uuid,
-        host_id: Uuid,
+        partial_host: PartialClient,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
     ) -> Game {
@@ -63,7 +64,7 @@ impl Game {
             is_host,
             game_id,
             client_id,
-            host_id,
+            partial_host,
             connected_clients,
             sockets,
             redis_pool,
@@ -76,15 +77,34 @@ impl Game {
         // Cancel if user is not game host
         if let Some(connected_clients) = &mut self.connected_clients {
             trace!("Registering client {} in game", partial_client.id);
-            for client in connected_clients.iter() {
-                let _ = client.1.send_message(
-                    DefaultModel::new(crate::service::websocket::client::models::hello::Hello {
-                        id: Uuid::new_v4(),
-                    }),
-                    Some(&self.sockets),
+            for clients in connected_clients.iter() {
+                // Send the new client to every old client already connected
+                let _ = clients.1.send_message(
+                    DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
+                        game_id: self.game_id.clone(),
+                        client_id: partial_client.id,
+                    })),
+                    &self.redis_pool,
+                );
+
+                // Send existing client to the newly connected client
+                let _ = partial_client.send_message(
+                    DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
+                        game_id: self.game_id.clone(),
+                        client_id: *clients.0,
+                    })),
                     &self.redis_pool,
                 );
             }
+
+            // Send the new client to the host
+            let _ = self.partial_host.send_message(
+                DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
+                    game_id: self.game_id.clone(),
+                    client_id: partial_client.id,
+                })),
+                &self.redis_pool,
+            );
 
             connected_clients.insert(partial_client.id.clone(), partial_client);
         }
@@ -118,17 +138,13 @@ impl Game {
             return Ok(());
         }
 
-        trace!("Host \"{}\" triggered a shutdown event", &self.host_id);
+        trace!("Host \"{}\" triggered a shutdown event", &self.partial_host.id);
         for client in self.connected_clients.as_ref().unwrap().iter() {
             let partial = client.1;
             let res = partial.send_message(
-                DefaultModel::new(GameEvent::new(
-                    Some(ShutdownGameEvent {
-                        game_id: self.game_id.clone(),
-                    }),
-                    GameEventOpCode::Shutdown,
-                )),
-                Some(&self.sockets),
+                DefaultModel::new(GameEvent::new(ShutdownGameEvent {
+                    game_id: self.game_id.clone(),
+                })),
                 &self.redis_pool,
             );
 
@@ -160,16 +176,6 @@ impl Game {
 
 impl Drop for Game {
     fn drop(&mut self) {
-        let mut conn = self
-            .redis_pool
-            .get()
-            .expect("failed to get redis connection");
-        let _: () = conn
-            .del(format!("GAME:{}", self.game_id))
-            .expect("could not remove game from redis");
-
-        if !self.shutdown {
-            let _ = self.shutdown(None);
-        }
+        // Todo: either shutdown the game or leave the game
     }
 }

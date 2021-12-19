@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use dashmap::DashMap;
-use futures::channel::oneshot::{Receiver, Sender};
+use futures::{
+    channel::oneshot::{Receiver, Sender},
+    Future,
+};
 use r2d2::Pool;
-use redis::{Commands, ControlFlow, PubSubCommands};
+use redis::{ControlFlow, PubSubCommands};
 use serde::Deserialize;
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -35,6 +38,35 @@ pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
     │
     └────► on received from other sharding ────► send to middleware
 */
+
+type ShardingMiddleware<F> = fn(Sockets, Pool<RedisConnectionManager>, ShardDefaultModel) -> F;
+
+pub struct MiddlewareManager<F>
+where
+    F: Future,
+{
+    function: ShardingMiddleware<F>,
+}
+
+impl<F> MiddlewareManager<F>
+where
+    F: Future,
+{
+    pub fn new(fun: ShardingMiddleware<F>) -> Self {
+        Self { function: fun }
+    }
+}
+
+impl<F> Clone for MiddlewareManager<F>
+where
+    F: Future,
+{
+    fn clone(&self) -> Self {
+        MiddlewareManager {
+            function: self.function,
+        }
+    }
+}
 
 pub struct Service<'a> {
     // shard enviromental variables
@@ -76,19 +108,18 @@ impl<'a> Service<'a> {
         }
     }
 
-    pub async fn run(
+    pub async fn run<F>(
         &mut self,
-        middleware: fn(Sockets, Pool<RedisConnectionManager>, ShardDefaultModel),
-    ) -> Result<(), Box<dyn std::error::Error>> {
+        middleware: MiddlewareManager<F>,
+    ) -> Result<(), Box<dyn std::error::Error>>
+    where
+        F: Future + Send + 'static,
+    {
         // Create a seperate thread for WebSockets
         let redis_pool = self.redis_pool.clone();
         let socket_connections = self.connections.clone();
         let shard_id = self.shard_id.to_string();
         let host_addr = self.host_addr.to_string();
-
-        // ! DEBUG CODE
-        let _: () = redis_pool.get().unwrap().set("GAME:monkey", "").unwrap();
-        // ! DEBUG CODE
 
         // Spawns websocket server task which handles all incoming tokio-tungstenite connections
         // And redirects them into the function websocket::accept_connection(...)
@@ -130,16 +161,30 @@ impl<'a> Service<'a> {
             // Subscribe to presence channel and receive messages from other sharding (socket servers)
             let _: () = con
                 .subscribe(&[shard_id], |msg| {
+                    trace!("Receiving message from shard");
+                    let local_middleware = middleware.clone();
+                    let local_socket_connections = socket_connections.clone();
+                    let local_pool = pool.clone();
+                    trace!("Parsing payload from shard message");
                     let payload: Vec<u8> = msg
                         .get_payload()
                         .expect("could not get pub/sub message payload");
+                    trace!(
+                        "Payload from shard message has length {} bytes",
+                        payload.len()
+                    );
 
                     // Todo: error handling
                     let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
                     let model = ShardDefaultModel::deserialize(payload).unwrap();
+                    trace!("Deserialized payload and found opcode: {:?}", &model.op);
 
                     // Call middleware function and pass in the payload
-                    middleware(socket_connections.clone(), pool.clone(), model);
+                    futures::executor::block_on((local_middleware.function)(
+                        local_socket_connections,
+                        local_pool,
+                        model,
+                    ));
 
                     ControlFlow::Continue
                 })

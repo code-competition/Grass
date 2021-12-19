@@ -56,7 +56,9 @@ impl Request {
 
                 // Check if user is already in a game
                 if client.game.is_some() {
-                    return Ok(());
+                    return Err(Box::new(ClientError::AlreadyInGame(
+                        "Client is already in a game",
+                    )));
                 }
 
                 // Parse the join request
@@ -78,14 +80,15 @@ impl Request {
                     conn.get(format!("GAME:{}", join_game.game_id.clone()));
                 let game = match game {
                     Ok(game) => game,
-                    Err(_) => {
+                    Err(e) => {
+                        error!("No game was found, {}", e);
                         return Err(Box::new(ClientError::NoGameWasFound));
                     }
                 };
 
                 // Check if the game has been initialized
+                // If it's not, set self as host and join game
                 if game == String::new() {
-                    // TODO: move redis game registration into a database handler structure
                     // Serialize game object data
                     let redis_game = RedisGame {
                         shard_id: shard_id.clone().to_string(),
@@ -101,11 +104,14 @@ impl Request {
                         true,
                         join_game.game_id.clone(),
                         client.id.clone(),
-                        redis_game.host_id.clone(),
+                        PartialClient::new(
+                            client.id.clone(),
+                            true,
+                            Some(client.socket_channel.clone()),
+                        ),
                         sockets.clone(),
                         redis_pool.clone(),
                     ));
-
                     client.send_model(DefaultModel::new(Response::new(
                         Some(JoinResponse {
                             game_id: join_game.game_id,
@@ -126,15 +132,18 @@ impl Request {
                             Some(game_host_client) => {
                                 if let Some(game_host_client_game) = &mut game_host_client.game {
                                     // Register the local client in the host game
-                                    game_host_client_game
-                                        .register(PartialClient::new(client.id.clone(), true));
+                                    game_host_client_game.register(PartialClient::new(
+                                        client.id.clone(),
+                                        true,
+                                        Some(client.socket_channel.clone()),
+                                    ));
 
                                     // Register the game for the client
                                     client.game = Some(Game::new(
                                         false,
                                         join_game.game_id.clone(),
                                         client.id.clone(),
-                                        redis_game.host_id.clone(),
+                                        PartialClient::new(redis_game.host_id.clone(), false, None),
                                         sockets.clone(),
                                         redis_pool.clone(),
                                     ));

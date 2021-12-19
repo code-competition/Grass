@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub use default::DefaultModel;
+pub use default::{DefaultModel, DefaultModelSharding};
 
 // All models are derived from default
 pub mod default;

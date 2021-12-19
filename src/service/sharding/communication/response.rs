@@ -2,7 +2,18 @@ use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 
 use crate::service::{
-    error::ServiceError, redis_pool::RedisConnectionManager, websocket::client::{game::{Game, models::{Response, response::join::JoinResponse, ResponseOpCode}}, models::DefaultModel, error::ClientError}, Sockets,
+    error::ServiceError,
+    redis_pool::RedisConnectionManager,
+    websocket::client::{
+        error::ClientError,
+        game::{
+            models::{response::join::JoinResponse, Response, ResponseOpCode},
+            partial_client::PartialClient,
+            Game,
+        },
+        models::DefaultModel,
+    },
+    Sockets,
 };
 
 use self::join::ShardJoinResponse;
@@ -52,23 +63,24 @@ impl ShardResponse {
                 let shard_join_game = self.data::<ShardJoinResponse>();
 
                 // Register the game on the client
-                let socket = sockets
-                    .get_mut(&shard_join_game.client_id);
+                let socket = sockets.get_mut(&shard_join_game.client_id);
                 let mut socket = match socket {
                     Some(socket) => socket,
                     None => {
                         return Err(Box::new(ServiceError::CouldNotGetSocket));
-                    },
+                    }
                 };
                 if socket.game.is_some() {
                     socket.send_error(ClientError::AlreadyInGame("Client is already in a game"))?;
+                    return Err(Box::new(ClientError::AlreadyInGame("Client was for some stupid reason already in a game")));
                 }
 
+                // Client successfully joined the game, give the client its game object
                 socket.game = Some(Game::new(
                     false,
                     shard_join_game.game_id.clone(),
                     shard_join_game.client_id,
-                    shard_join_game.host_id,
+                    PartialClient::new(shard_join_game.host_id, false, None),
                     sockets.clone(),
                     redis_pool.clone(),
                 ));

@@ -63,7 +63,7 @@ impl ShardRequest {
                     .game
                     .as_mut()
                     .ok_or(ServiceError::GameDoesNotExist)?;
-                game.register(PartialClient::new(shard_join_game.client_id, false));
+                game.register(PartialClient::new(shard_join_game.client_id, false, None));
                 drop(game_host);
 
                 // Serialize response

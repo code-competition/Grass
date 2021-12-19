@@ -6,21 +6,23 @@ use crate::service::{
     sharding::communication::{
         request::ShardRequest, response::ShardResponse, ShardDefaultModel, ShardOpCode,
     },
-    websocket::client::models::DefaultModel,
+    websocket::client::models::{DefaultModel, DefaultModelSharding},
     Sockets,
 };
 
 /// shard_payload_interceptor
 ///
 /// Intercepts messages from other sharding and handles them
-pub fn shard_payload_interceptor(
+pub async fn shard_payload_interceptor(
     sockets: Sockets,
     redis_pool: Pool<RedisConnectionManager>,
     payload: ShardDefaultModel,
 ) {
+    info!("Receiving payload from other shard with opcode {:?}", payload.op);
     match payload.op {
         ShardOpCode::SendAsDefaultModelToClient(client_id) => {
-            let model = payload.data::<DefaultModel<Value>>();
+            let model = payload.data::<DefaultModelSharding>();
+            let model: DefaultModel<Value> = serde_json::from_str(&model).expect("could not parse default model sharding");
             match sockets.get(&client_id) {
                 Some(socket) => {
                     let _ = socket.send_model(model);
