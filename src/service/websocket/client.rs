@@ -54,7 +54,7 @@ impl SocketClient {
 
     /// Triggered when connection is closing
     pub fn on_close(&mut self) {
-        if let Some(mut game) = self.game.take() {
+        if let Some(game) = self.game.take() {
             drop(game);
         }
     }
@@ -83,7 +83,7 @@ impl SocketClient {
 
     /// Called when a client receives a new message
     pub async fn on_message(
-        &mut self,
+        client_id: Uuid,
         redis_pool: Pool<RedisConnectionManager>,
         message: Message,
         shard_id: &str,
@@ -99,7 +99,7 @@ impl SocketClient {
                 match model {
                     Ok(model) => {
                         if let Err(e) = ClientMessageHandler::handle_message(
-                            self, sockets, redis_pool, model, shard_id,
+                            client_id, sockets, redis_pool, model, shard_id,
                         ) {
                             error!("Error while handling message {}", e);
                             should_close = true;
@@ -109,15 +109,15 @@ impl SocketClient {
                         error!("Client reached an error {:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
-                        self.send_error(ClientError::InvalidMessage(
-                            "Invalid model, closing connection.",
-                        ))?;
+                        sockets.get(&client_id).unwrap().send_error(
+                            ClientError::InvalidMessage("Invalid model, closing connection."),
+                        )?;
                     }
                 }
             }
-            Message::Ping(bin) => self.send(Message::Pong(bin))?,
+            Message::Ping(bin) => sockets.get(&client_id).unwrap().send(Message::Pong(bin))?,
             Message::Pong(bin) => {
-                self.send(Message::Ping(bin))?;
+                sockets.get(&client_id).unwrap().send(Message::Ping(bin))?;
             }
             Message::Close(reason) => {
                 info!("Received close message: {:?}", reason);

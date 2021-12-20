@@ -45,28 +45,25 @@ pub async fn accept_connection(
         .try_for_each(|message| {
             // Get the client id
             let client_id = *client.id();
-            // Get the local socket from the connections hashmap
-            let socket = sockets.get_mut(&client_id);
 
-            // Trigger on_message(...) event for the client
-            if let Some(mut socket) = socket {
-                match futures::executor::block_on(socket.on_message(
-                    redis_pool.clone(),
-                    message,
-                    &shard_id_message.clone(),
-                    sockets.clone(),
-                )) {
-                    Ok(should_close) => {
-                        if should_close {
-                            trace!("Reached an should_close point, disconnecting socket.");
-                            return future::err(
-                                tokio_tungstenite::tungstenite::Error::ConnectionClosed,
-                            );
-                        }
+            // Trigger on_message(...) event
+            match futures::executor::block_on(SocketClient::on_message(
+                client_id,
+                redis_pool.clone(),
+                message,
+                &shard_id_message.clone(),
+                sockets.clone(),
+            )) {
+                Ok(should_close) => {
+                    if should_close {
+                        trace!("Reached an should_close point, disconnecting socket.");
+                        return future::err(
+                            tokio_tungstenite::tungstenite::Error::ConnectionClosed,
+                        );
                     }
-                    Err(e) => {
-                        error!("Failed to parse message socket: {}", e);
-                    }
+                }
+                Err(e) => {
+                    error!("Failed to parse message socket: {}", e);
                 }
             }
 

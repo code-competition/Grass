@@ -1,5 +1,6 @@
 use r2d2::Pool;
 use serde_json::Value;
+use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
@@ -7,16 +8,13 @@ use crate::service::{
     Sockets,
 };
 
-use super::{
-    models::{DefaultModel, OpCode},
-    SocketClient,
-};
+use super::models::{DefaultModel, OpCode};
 
 pub struct ClientMessageHandler {}
 
 impl ClientMessageHandler {
     pub fn handle_message(
-        client: &mut SocketClient,
+        client_id: Uuid,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
         model: DefaultModel<Value>,
@@ -39,7 +37,7 @@ impl ClientMessageHandler {
             OpCode::Request => {
                 let request: Request = serde_json::from_value(data)?;
 
-                return request.handle_message(client, sockets, redis_pool, shard_id);
+                return request.handle_message(client_id, sockets, redis_pool, shard_id);
             }
             _ => {
                 return Err(Box::new(ClientError::InvalidOpCode));

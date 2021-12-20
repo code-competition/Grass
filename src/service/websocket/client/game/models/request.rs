@@ -19,7 +19,6 @@ use crate::service::{
         error::ClientError,
         game::{partial_client::PartialClient, redis_game::RedisGame, Game},
         models::{DefaultModel, OpCode, OpCodeFetcher},
-        SocketClient,
     },
     Sockets,
 };
@@ -42,7 +41,7 @@ pub struct Request {
 impl Request {
     pub fn handle_message(
         self,
-        client: &mut SocketClient,
+        client_id: Uuid,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
         shard_id: &str,
@@ -54,6 +53,10 @@ impl Request {
                         "Internal Server Error",
                     )));
                 }
+
+                // Fetch client
+                // ! Important: This client is cloned to guarantee that no deadlocks occur
+                let client = sockets.get(&client_id).unwrap().clone();
 
                 // Check if user is already in a game
                 if client.game.is_some() {
@@ -101,6 +104,7 @@ impl Request {
                     let _: () =
                         conn.set(format!("GAME:{}", join_game.game_id), serialized_redis_game)?;
 
+                    let mut client = sockets.get_mut(&client_id).unwrap();
                     client.game = Some(Game::new(
                         true,
                         join_game.game_id.clone(),
@@ -119,6 +123,7 @@ impl Request {
                         redis_pool.clone(),
                         sockets.clone(),
                     ));
+
                     client.send_model(DefaultModel::new(Response::new(
                         Some(JoinResponse {
                             game_id: join_game.game_id,
@@ -147,6 +152,7 @@ impl Request {
                                     ));
 
                                     // Register the game for the client
+                                    let mut client = sockets.get_mut(&client_id).unwrap();
                                     client.game = Some(Game::new(
                                         false,
                                         join_game.game_id.clone(),
@@ -159,7 +165,7 @@ impl Request {
                                         PartialClient::new(
                                             redis_game.host_id.clone(),
                                             shard_id.to_string(),
-                                            false,
+                                            true,
                                             Some(game_host_client.socket_channel.clone()),
                                         ),
                                         redis_pool.clone(),
@@ -213,14 +219,18 @@ impl Request {
                     )));
                 }
 
+                let mut client = sockets.get_mut(&client_id).unwrap();
+
                 if client.game.is_none() {
                     return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
                 } else if client.game.as_ref().unwrap().is_host {
-                    return Err(Box::new(ClientError::NotGameHost("Client was not the game host")));
+                    return Err(Box::new(ClientError::NotGameHost(
+                        "Client was not the game host",
+                    )));
                 }
 
                 let shutdown_game: ShutdownRequest = serde_json::from_value(self.d.unwrap())?;
-                if let Some(mut game) = client.game.take() {
+                if let Some(game) = client.game.take() {
                     if game.game_id == shutdown_game.game_id {
                         trace!("Shutting down game");
                         drop(game);
@@ -229,12 +239,12 @@ impl Request {
                         return Err(Box::new(ClientError::InvalidGameID));
                     }
                 } else {
-                    return Err(Box::new(ClientError::NotInGame(
-                        "Client was not in a game",
-                    )));
+                    return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
                 }
             }
             RequestOpCode::Leave => {
+                let mut client = sockets.get_mut(&client_id).unwrap();
+
                 trace!("Received request to leave a game");
                 if client.game.is_none() {
                     return Err(Box::new(ClientError::NotInGame("Client was not in a game")));

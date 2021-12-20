@@ -29,7 +29,7 @@ use self::{
     models::event::disconnected_client::DisconnectedClientGameEvent, partial_client::PartialClient,
 };
 
-use super::{error::ClientError, SocketClient};
+use super::error::ClientError;
 
 pub mod models;
 pub mod partial_client;
@@ -226,13 +226,14 @@ impl Drop for Game {
             let mut conn = self.redis_pool.get().unwrap();
             let _: () = conn.del(format!("GAME:{}", self.game_id)).unwrap();
         } else if self.partial_host.is_local {
+            info!("Leaving game, the host is local");
             if let Some(host_client) = &mut self.sockets.get_mut(&self.partial_host.id) {
                 if let Some(game) = &mut host_client.game {
                     game.unregister(&self.partial_client.id);
                 }
             }
         } else {
-            info!("Leaving a game");
+            info!("Leaving a game on another shard");
             // If the client is not host, disconnect it from the game
             let request = ShardRequest::new(
                 ShardLeaveRequest {
