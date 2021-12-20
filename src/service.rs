@@ -6,8 +6,6 @@ use futures::{
     Future,
 };
 use r2d2::Pool;
-use redis::{ControlFlow, PubSubCommands};
-use serde::Deserialize;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -39,7 +37,7 @@ pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
     └────► on received from other sharding ────► send to middleware
 */
 
-type ShardingMiddleware<F> = fn(Sockets, Pool<RedisConnectionManager>, ShardDefaultModel) -> F;
+type ShardingMiddleware<F> = fn(String, Sockets, Pool<RedisConnectionManager>, ShardDefaultModel) -> F;
 
 pub struct MiddlewareManager<F>
 where
@@ -110,7 +108,7 @@ impl<'a> Service<'a> {
 
     pub async fn run<F>(
         &mut self,
-        middleware: MiddlewareManager<F>,
+        _middleware: MiddlewareManager<F>,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         F: Future + Send + 'static,
@@ -144,51 +142,58 @@ impl<'a> Service<'a> {
         // Clone arcs and get ip addresses for redis to send into redis reader task
         let shard_id = self.shard_id.to_string();
         let redis_addr = self.redis_addr.to_string();
-        let socket_connections = self.connections.clone();
+        let _socket_connections = self.connections.clone();
 
         // Create a seperate thread for PubSub channels
         // Spawns the tokio task that handles all incoming messages from redis
-        let pool = redis_pool.clone();
+        let _pool = redis_pool.clone();
         let joinhandle_presence = tokio::spawn(async move {
             // Opens a new redis connection outside the pool to leverage better connection speeds
             let client = redis::Client::open(redis_addr).expect("redis connection failed");
-            let mut con = client
+            let mut _con = client
                 .get_connection()
                 .expect("could not get redis connection");
 
             info!("shard id registered to pub/sub: {}", shard_id);
 
+            loop {}
+
+            // ! Sharding is not a prioritized feature, might work on it if time allows
+
             // Subscribe to presence channel and receive messages from other sharding (socket servers)
-            let _: () = con
-                .subscribe(&[shard_id], |msg| {
-                    trace!("Receiving message from shard");
-                    let local_middleware = middleware.clone();
-                    let local_socket_connections = socket_connections.clone();
-                    let local_pool = pool.clone();
-                    trace!("Parsing payload from shard message");
-                    let payload: Vec<u8> = msg
-                        .get_payload()
-                        .expect("could not get pub/sub message payload");
-                    trace!(
-                        "Payload from shard message has length {} bytes",
-                        payload.len()
-                    );
+            // let local_shard_id = shard_id.clone();
+            // let _: () = con
+            //     .subscribe(&[shard_id], |msg| {
+            //         trace!("Receiving message from shard");
+            //         let local_middleware = middleware.clone();
+            //         let local_socket_connections = socket_connections.clone();
+            //         let local_pool = pool.clone();
+            //         let local_shard_id = local_shard_id.clone();
+            //         trace!("Parsing payload from shard message");
+            //         let payload: Vec<u8> = msg
+            //             .get_payload()
+            //             .expect("could not get pub/sub message payload");
+            //         trace!(
+            //             "Payload from shard message has length {} bytes",
+            //             payload.len()
+            //         );
 
-                    // Todo: error handling
-                    let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
-                    let model = ShardDefaultModel::deserialize(payload).unwrap();
-                    trace!("Deserialized payload and found opcode: {:?}", &model.op);
+            //         // Todo: error handling
+            //         let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
+            //         let model = ShardDefaultModel::deserialize(payload).unwrap();
+            //         trace!("Deserialized payload and found opcode: {:?}", &model.op);
 
-                    // Call middleware function and pass in the payload
-                    futures::executor::block_on((local_middleware.function)(
-                        local_socket_connections,
-                        local_pool,
-                        model,
-                    ));
+            //         // Call middleware function and pass in the payload
+            //         futures::executor::block_on((local_middleware.function)(
+            //             local_shard_id,
+            //             local_socket_connections,
+            //             local_pool,
+            //             model,
+            //         ));
 
-                    ControlFlow::Continue
-                })
-                .unwrap();
+            //         ControlFlow::Continue
+            //     })
+            //     .unwrap();
         });
 
         // This custom select function exits when one of the futures returns,

@@ -19,9 +19,9 @@ use crate::service::{
     Sockets,
 };
 
-use self::join::ShardJoinResponse;
+use self::{join::ShardJoinResponse, leave::ShardLeaveResponse};
 
-use super::{request::leave::ShardLeaveRequest, ShardOpCode, ShardOpCodeFetcher};
+use super::{ShardOpCode, ShardOpCodeFetcher};
 
 pub mod join;
 pub mod leave;
@@ -59,6 +59,7 @@ impl ShardResponse {
 
     pub fn handle(
         self,
+        shard_id: String,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -87,7 +88,7 @@ impl ShardResponse {
                     response.game_id.clone(),
                     PartialClient::new(
                         response.client_id,
-                        response.shard_id.to_string(),
+                        shard_id,
                         true,
                         Some(socket.socket_channel.clone()),
                     ),
@@ -111,24 +112,16 @@ impl ShardResponse {
                 )))?;
             }
             ShardResponseOpCode::Leave => {
-                let response = self.data::<ShardLeaveRequest>();
+                let response = self.data::<ShardLeaveResponse>();
+                println!("{:?}", (response));
 
-                // Register the game on the client
-                let socket = sockets.get_mut(&response.client_id);
-                let mut socket = match socket {
+                let socket = sockets.get(&response.client_id);
+                let socket = match socket {
                     Some(socket) => socket,
                     None => {
                         return Err(Box::new(ServiceError::CouldNotGetSocket));
                     }
                 };
-                if socket.game.is_none() {
-                    socket.send_error(ClientError::NotInGame("Client is not in a game"))?;
-                    return Err(Box::new(ClientError::NotInGame(
-                        "Client was for some stupid reason not in a game",
-                    )));
-                }
-
-                socket.game = None;
 
                 socket.send_model(DefaultModel::new(Response::new(
                     Some(LeaveResponse {

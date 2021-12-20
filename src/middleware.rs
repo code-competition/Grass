@@ -14,6 +14,7 @@ use crate::service::{
 ///
 /// Intercepts messages from other sharding and handles them
 pub async fn shard_payload_interceptor(
+    shard_id: String,
     sockets: Sockets,
     redis_pool: Pool<RedisConnectionManager>,
     payload: ShardDefaultModel,
@@ -33,7 +34,7 @@ pub async fn shard_payload_interceptor(
         ShardOpCode::GameEvent => todo!(),
         ShardOpCode::Request => {
             let request = payload.data::<ShardRequest>();
-            match request.handle(sockets, redis_pool) {
+            match request.handle(shard_id, sockets, redis_pool) {
                 Ok(_) => (),
                 Err(e) => {
                     error!("error while handling shard request payload: {}", e);
@@ -42,7 +43,7 @@ pub async fn shard_payload_interceptor(
         }
         ShardOpCode::Response => {
             let response = payload.data::<ShardResponse>();
-            match response.handle(sockets, redis_pool) {
+            match response.handle(shard_id, sockets, redis_pool) {
                 Ok(_) => (),
                 Err(e) => {
                     error!("error while handling shard response payload: {}", e);

@@ -1,5 +1,8 @@
+use std::str::FromStr;
+
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use crate::service::{
     error::ServiceError, redis_pool::RedisConnectionManager, sharding,
@@ -49,6 +52,7 @@ impl ShardRequest {
 
     pub fn handle(
         self,
+        shard_id: String,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -72,7 +76,7 @@ impl ShardRequest {
                         game_id: request.game_id,
                         host_id: request.host_id,
                         client_id: request.client_id,
-                        shard_id: request.shard_id,
+                        shard_id: Uuid::from_str(&shard_id).unwrap(),
                     },
                     ShardResponseOpCode::Join,
                 );
@@ -104,7 +108,7 @@ impl ShardRequest {
                         game_id: request.game_id,
                         host_id: request.host_id,
                         client_id: request.client_id,
-                        shard_id: request.shard_id,
+                        shard_id: Uuid::from_str(&shard_id).unwrap(),
                     },
                     ShardResponseOpCode::Leave,
                 );
