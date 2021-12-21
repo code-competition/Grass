@@ -156,6 +156,7 @@ impl<'a> Service<'a> {
 
             info!("shard id registered to pub/sub: {}", shard_id);
 
+            #[allow(clippy::empty_loop)]
             loop {}
 
             // ! Sharding is not a prioritized feature, might work on it if time allows

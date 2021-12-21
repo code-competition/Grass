@@ -36,11 +36,10 @@ impl ClientMessageHandler {
         match model.op {
             OpCode::Request => {
                 let request: Request = serde_json::from_value(data)?;
-
-                return request.handle_message(client_id, sockets, redis_pool, shard_id);
+                request.handle_message(client_id, sockets, redis_pool, shard_id)
             }
             _ => {
-                return Err(Box::new(ClientError::InvalidOpCode));
+                Err(Box::new(ClientError::InvalidOpCode))
             }
         }
     }

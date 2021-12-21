@@ -43,10 +43,12 @@ pub async fn accept_connection(
     let read_channel = read
         .try_filter(|message| future::ready(!message.is_close()))
         .try_for_each(|message| {
+            trace!("Received a messagrom from websocket, reading it...");
             // Get the client id
             let client_id = *client.id();
 
             // Trigger on_message(...) event
+            info!("Triggering on_message event for client");
             match futures::executor::block_on(SocketClient::on_message(
                 client_id,
                 redis_pool.clone(),
@@ -67,6 +69,7 @@ pub async fn accept_connection(
                 }
             }
 
+            info!("on_message event was successfully finished");
             future::ok(())
         });
 

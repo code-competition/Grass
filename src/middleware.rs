@@ -19,16 +19,17 @@ pub async fn shard_payload_interceptor(
     redis_pool: Pool<RedisConnectionManager>,
     payload: ShardDefaultModel,
 ) {
-    info!("Receiving payload from other shard with opcode {:?}", payload.op);
+    info!(
+        "Receiving payload from other shard with opcode {:?}",
+        payload.op
+    );
     match payload.op {
         ShardOpCode::SendAsDefaultModelToClient(client_id) => {
             let model = payload.data::<DefaultModelSharding>();
-            let model: DefaultModel<Value> = serde_json::from_str(&model).expect("could not parse default model sharding");
-            match sockets.get(&client_id) {
-                Some(socket) => {
-                    let _ = socket.send_model(model);
-                }
-                None => (),
+            let model: DefaultModel<Value> =
+                serde_json::from_str(&model).expect("could not parse default model sharding");
+            if let Some(socket) = sockets.get(&client_id) {
+                let _ = socket.send_model(model);
             }
         }
         ShardOpCode::GameEvent => todo!(),

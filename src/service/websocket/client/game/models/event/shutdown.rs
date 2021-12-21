@@ -1,11 +1,9 @@
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 use super::{GameEventOpCode, GameEventOpCodeFetcher};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ShutdownGameEvent {
-    pub(crate) game_id: String,
-}
+pub struct ShutdownGameEvent {}
 
 impl GameEventOpCodeFetcher for ShutdownGameEvent {
     #[inline]

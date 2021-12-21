@@ -1,3 +1,4 @@
+use redis::Commands;
 use serde::Deserialize;
 use service::Service;
 
@@ -16,6 +17,12 @@ struct Config {
     redis_addr: String,
 }
 
+#[cfg(debug_assertions)]
+#[derive(Deserialize, Debug)]
+struct DebugConfig {
+    should_reset_redis: bool,
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("RUST_LOG", "grass");
@@ -29,6 +36,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             port: 5000,
             redis_addr: "redis://127.0.0.1:5374".into(),
         },
+    };
+
+    // Env debug config
+    #[cfg(debug_assertions)]
+    if let Ok(config) = envy::from_env::<DebugConfig>() {
+        if config.should_reset_redis {
+            let client = redis::Client::open(cfg.redis_addr.to_string())
+                .expect("redis connection failed");
+            let mut con = client
+                .get_connection()
+                .expect("could not get redis connection");
+            let _: () = con.set("GAME:monkey", "").unwrap();
+        }
     };
 
     // Generate random shard (container instance) id

@@ -98,7 +98,7 @@ impl ShardResponse {
                         false,
                         None,
                     ),
-                    redis_pool.clone(),
+                    redis_pool,
                     sockets.clone(),
                 ));
 

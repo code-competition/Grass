@@ -1,6 +1,6 @@
 use std::{
     error::Error,
-    fmt::{Display, Formatter},
+    fmt::{Display, Formatter, self},
 };
 
 #[derive(Debug, Clone)]
@@ -9,30 +9,13 @@ pub enum ServiceError {
     GameDoesNotExist,
 }
 
-impl std::fmt::Display for ServiceError {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter) -> std::fmt::Result {
-        #[allow(deprecated)]
-        match self.cause() {
-            Some(cause) => write!(fmt, "{}: {}", self.description(), cause),
-            None => write!(fmt, "{}", self.description()),
-        }
+impl fmt::Display for ServiceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Error \"{:?}\"", self)
     }
 }
 
-impl std::error::Error for ServiceError {
-    fn description(&self) -> &str {
-        #[allow(deprecated)]
-        match *self {
-            _ => ""
-        }
-    }
-
-    fn cause(&self) -> Option<&dyn std::error::Error> {
-        match *self {
-            _ => None,
-        }
-    }
-}
+impl std::error::Error for ServiceError {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CriticalError {

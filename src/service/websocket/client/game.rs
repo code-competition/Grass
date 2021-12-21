@@ -84,6 +84,7 @@ impl Game {
 
     /// Register a new client with the game
     pub fn register(&mut self, partial_client: PartialClient) {
+        trace!("Registering client from game");
         // Cancel if user is not game host
         if !self.is_host {
             return;
@@ -126,18 +127,19 @@ impl Game {
         self.connected_clients
             .as_mut()
             .unwrap()
-            .insert(partial_client.id.clone(), partial_client);
+            .insert(partial_client.id, partial_client);
     }
 
     /// Unregister a client from the game
     pub fn unregister(&mut self, client_id: &Uuid) {
+        trace!("Unregistering client from game");
         // Cancel if user is not game host
         if self.is_host {
             // Send the disconnected client event to all connected clients
             let _ = self.send_global(
                 DefaultModel::new(GameEvent::new(DisconnectedClientGameEvent {
                     game_id: self.game_id.clone(),
-                    client_id: client_id.clone(),
+                    client_id: *client_id,
                 })),
                 &self.redis_pool,
             );
@@ -155,6 +157,8 @@ impl Game {
     where
         T: Serialize + Deserialize<'a> + Clone,
     {
+        trace!("Sending a global message to all clients in a game");
+
         // Send message to clients
         for clients in self
             .connected_clients
@@ -162,17 +166,18 @@ impl Game {
             .ok_or(ClientError::InternalServerError("not host"))?
             .iter()
         {
-            clients.1.send_message(message.clone(), &redis_pool)?;
+            clients.1.send_message(message.clone(), redis_pool)?;
         }
 
         // Send message to host
-        self.partial_host.send_message(message, &redis_pool)?;
+        self.partial_host.send_message(message, redis_pool)?;
 
         Ok(())
     }
 
     /// Force shutdown the game
     pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        trace!("Trying to shutdown a game");
         if !self.is_host {
             return Err(Box::new(ClientError::NotGameHost(
                 "Client is not game host",
@@ -186,16 +191,14 @@ impl Game {
         for client in self.connected_clients.as_ref().unwrap().iter() {
             let partial = client.1;
             let res = partial.send_message(
-                DefaultModel::new(GameEvent::new(ShutdownGameEvent {
-                    game_id: self.game_id.clone(),
-                })),
+                DefaultModel::new(GameEvent::new(ShutdownGameEvent {})),
                 &self.redis_pool,
             );
 
             match res {
                 Ok(_) => (),
                 Err(e) => {
-                    error!("Critical error when ending game {}", e);
+                    error!("Failed to send shutdown event to client{}", e);
                 }
             }
         }
@@ -203,13 +206,14 @@ impl Game {
         self.connected_clients.as_mut().unwrap().clear();
         self.shutdown = true;
 
+        // Deleting game from redis
+        let mut conn = self.redis_pool.get()?;
+        let _: () = conn.del(format!("GAME:{}", self.game_id))?;
+
         // Send final goodbye to the host
         self.partial_host.send_message(
             DefaultModel::new(Response::new(
-                Some(ShutdownResponse {
-                    game_id: Some(self.game_id.clone()),
-                    success: true,
-                }),
+                Some(ShutdownResponse { success: true }),
                 models::ResponseOpCode::Shutdown,
             )),
             &self.redis_pool,
@@ -220,6 +224,7 @@ impl Game {
 
 impl Drop for Game {
     fn drop(&mut self) {
+        info!("Dropping a game object");
         if self.is_host {
             info!("Shutting down a game");
             let _ = self.shutdown();

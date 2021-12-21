@@ -23,13 +23,12 @@ use crate::service::{
     Sockets,
 };
 
-use self::{join::JoinRequest, shutdown::ShutdownRequest};
+use self::join::JoinRequest;
 
 use super::{response::join::JoinResponse, Response, ResponseOpCode};
 
 pub mod join;
 pub mod leave;
-pub mod shutdown;
 
 // Models for requests
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,6 +59,8 @@ impl Request {
 
                 // Check if user is already in a game
                 if client.game.is_some() {
+                    let _ = client
+                        .send_error(ClientError::AlreadyInGame("Client is already in a game"));
                     return Err(Box::new(ClientError::AlreadyInGame(
                         "Client is already in a game",
                     )));
@@ -73,6 +74,7 @@ impl Request {
                 let mut conn = match conn {
                     Ok(c) => c,
                     Err(_) => {
+                        let _ = client.send_error(ClientError::InternalServerError(""));
                         return Err(Box::new(ClientError::InternalServerError(
                             "Internal Server Error",
                         )));
@@ -81,11 +83,12 @@ impl Request {
 
                 // Try to fetch the game from redis
                 let game: redis::RedisResult<String> =
-                    conn.get(format!("GAME:{}", join_game.game_id.clone()));
+                    conn.get(format!("GAME:{}", join_game.game_id));
                 let game = match game {
                     Ok(game) => game,
-                    Err(e) => {
-                        error!("No game was found, {}", e);
+                    Err(_) => {
+                        error!("No game was found");
+                        let _ = client.send_error(ClientError::NoGameWasFound);
                         return Err(Box::new(ClientError::NoGameWasFound));
                     }
                 };
@@ -95,8 +98,8 @@ impl Request {
                 if game == String::new() {
                     // Serialize game object data
                     let redis_game = RedisGame {
-                        shard_id: shard_id.clone().to_string(),
-                        host_id: client.id.clone(),
+                        shard_id: (*shard_id).to_string(),
+                        host_id: client.id,
                     };
                     let serialized_redis_game = serde_json::to_string(&redis_game).unwrap();
 
@@ -109,18 +112,18 @@ impl Request {
                         true,
                         join_game.game_id.clone(),
                         PartialClient::new(
-                            client.id.clone(),
+                            client.id,
                             redis_game.shard_id.clone(),
                             true,
                             Some(client.socket_channel.clone()),
                         ),
                         PartialClient::new(
-                            client.id.clone(),
-                            redis_game.shard_id.clone(),
+                            client.id,
+                            redis_game.shard_id,
                             true,
                             Some(client.socket_channel.clone()),
                         ),
-                        redis_pool.clone(),
+                        redis_pool,
                         sockets.clone(),
                     ));
 
@@ -145,10 +148,10 @@ impl Request {
                                 if let Some(game_host_client_game) = &mut game_host_client.game {
                                     // Register the local client in the host game
                                     game_host_client_game.register(PartialClient::new(
-                                        client.id.clone(),
+                                        client.id,
                                         shard_id.to_string(),
                                         true,
-                                        Some(client.socket_channel.clone()),
+                                        Some(client.socket_channel),
                                     ));
 
                                     // Register the game for the client
@@ -157,18 +160,18 @@ impl Request {
                                         false,
                                         join_game.game_id.clone(),
                                         PartialClient::new(
-                                            client.id.clone(),
+                                            client.id,
                                             shard_id.to_string(),
                                             true,
                                             Some(client.socket_channel.clone()),
                                         ),
                                         PartialClient::new(
-                                            redis_game.host_id.clone(),
+                                            redis_game.host_id,
                                             shard_id.to_string(),
                                             true,
                                             Some(game_host_client.socket_channel.clone()),
                                         ),
-                                        redis_pool.clone(),
+                                        redis_pool,
                                         sockets.clone(),
                                     ));
 
@@ -180,9 +183,12 @@ impl Request {
                                         }),
                                         ResponseOpCode::Join,
                                     )))?;
+                                } else {
+                                    let _: redis::RedisResult<()> = conn.del(format!("GAME:{}", join_game.game_id));
                                 }
                             }
                             None => {
+                                let _: redis::RedisResult<()> = conn.del(format!("GAME:{}", join_game.game_id));
                                 return Err(Box::new(ClientError::ClientDoesNotExist(
                                     "Socket client does not exist",
                                 )));
@@ -197,7 +203,7 @@ impl Request {
                                 game_id: join_game.game_id,
                                 client_id: client.id,
                                 host_id: redis_game.host_id,
-                                shard_id: Uuid::from_str(&shard_id)?,
+                                shard_id: Uuid::from_str(shard_id)?,
                             },
                             ShardRequestOpCode::Join,
                         );
@@ -212,41 +218,12 @@ impl Request {
                     }
                 }
             }
-            RequestOpCode::Shutdown => {
-                if self.d.is_none() {
-                    return Err(Box::new(ClientError::InternalServerError(
-                        "Internal Server Error",
-                    )));
-                }
-
-                let mut client = sockets.get_mut(&client_id).unwrap();
-
-                if client.game.is_none() {
-                    return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
-                } else if client.game.as_ref().unwrap().is_host {
-                    return Err(Box::new(ClientError::NotGameHost(
-                        "Client was not the game host",
-                    )));
-                }
-
-                let shutdown_game: ShutdownRequest = serde_json::from_value(self.d.unwrap())?;
-                if let Some(game) = client.game.take() {
-                    if game.game_id == shutdown_game.game_id {
-                        trace!("Shutting down game");
-                        drop(game);
-                    } else {
-                        trace!("Receieved invalid game_id from client");
-                        return Err(Box::new(ClientError::InvalidGameID));
-                    }
-                } else {
-                    return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
-                }
-            }
             RequestOpCode::Leave => {
                 let mut client = sockets.get_mut(&client_id).unwrap();
 
                 trace!("Received request to leave a game");
                 if client.game.is_none() {
+                    let _ = client.send_error(ClientError::NotInGame("Client was not in a game"));
                     return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
                 }
 
@@ -266,7 +243,6 @@ impl Request {
 pub enum RequestOpCode {
     Join,
     Leave,
-    Shutdown,
 }
 
 impl OpCodeFetcher for Request {

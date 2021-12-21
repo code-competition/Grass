@@ -52,7 +52,7 @@ impl PartialClient {
             )?;
         } else {
             sharding::send_redis(
-                &redis_pool,
+                redis_pool,
                 (Some(self.id), None),
                 message.to_sharding(),
                 ShardOpCode::SendAsDefaultModelToClient(self.id),

@@ -131,7 +131,7 @@ impl SocketClient {
 
     /// Sends a error to the client
     #[inline]
-    pub fn send_error<'a>(&self, err: ClientError) -> Result<(), SendError<Message>> {
+    pub fn send_error(&self, err: ClientError) -> Result<(), SendError<Message>> {
         self.send_model(DefaultModel::new(err))
     }
 
