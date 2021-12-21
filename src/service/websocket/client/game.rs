@@ -134,7 +134,7 @@ impl Game {
     pub fn unregister(&mut self, client_id: &Uuid) {
         trace!("Unregistering client from game");
         // Cancel if user is not game host
-        if self.is_host {
+        if self.is_host && self.connected_clients.as_mut().unwrap().remove(client_id).is_some() {
             // Send the disconnected client event to all connected clients
             let _ = self.send_global(
                 DefaultModel::new(GameEvent::new(DisconnectedClientGameEvent {
@@ -143,8 +143,6 @@ impl Game {
                 })),
                 &self.redis_pool,
             );
-
-            self.connected_clients.as_mut().unwrap().remove(client_id);
         }
     }
 
