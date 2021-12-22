@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use r2d2::Pool;
 use redis::Commands;
@@ -17,18 +17,20 @@ use crate::service::{
     },
     websocket::client::{
         error::ClientError,
-        game::{partial_client::PartialClient, redis_game::RedisGame, Game},
+        game::{partial_client::PartialClient, redis_game::RedisGame, task::GameTask, Game},
         models::{DefaultModel, OpCode, OpCodeFetcher},
     },
     Sockets,
 };
 
-use self::join::JoinRequest;
+use self::{join::JoinRequest, start::StartRequest, task::TaskRequest};
 
 use super::{response::join::JoinResponse, Response, ResponseOpCode};
 
 pub mod join;
 pub mod leave;
+pub mod start;
+pub mod task;
 
 // Models for requests
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -43,6 +45,7 @@ impl Request {
         client_id: Uuid,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
+        available_tasks: Arc<Vec<GameTask>>,
         shard_id: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
         match self.op {
@@ -147,12 +150,25 @@ impl Request {
                             Some(game_host_client) => {
                                 if let Some(game_host_client_game) = &mut game_host_client.game {
                                     // Register the local client in the host game
-                                    game_host_client_game.register(PartialClient::new(
-                                        client.id,
-                                        shard_id.to_string(),
-                                        true,
-                                        Some(client.socket_channel),
-                                    ));
+                                    if game_host_client_game
+                                        .register(PartialClient::new(
+                                            client.id,
+                                            shard_id.to_string(),
+                                            true,
+                                            Some(client.socket_channel.clone()),
+                                        ))
+                                        .is_err()
+                                    {
+                                        client.send_model(DefaultModel::new(Response::new(
+                                            Some(JoinResponse {
+                                                game_id: join_game.game_id,
+                                                is_host: false,
+                                                success: false,
+                                            }),
+                                            ResponseOpCode::Join,
+                                        )))?;
+                                        return Ok(());
+                                    }
 
                                     // Register the game for the client
                                     let mut client = sockets.get_mut(&client_id).unwrap();
@@ -184,11 +200,13 @@ impl Request {
                                         ResponseOpCode::Join,
                                     )))?;
                                 } else {
-                                    let _: redis::RedisResult<()> = conn.del(format!("GAME:{}", join_game.game_id));
+                                    let _: redis::RedisResult<()> =
+                                        conn.del(format!("GAME:{}", join_game.game_id));
                                 }
                             }
                             None => {
-                                let _: redis::RedisResult<()> = conn.del(format!("GAME:{}", join_game.game_id));
+                                let _: redis::RedisResult<()> =
+                                    conn.del(format!("GAME:{}", join_game.game_id));
                                 return Err(Box::new(ClientError::ClientDoesNotExist(
                                     "Socket client does not exist",
                                 )));
@@ -233,6 +251,29 @@ impl Request {
                 // Dropping the game object will leave the game cleanly, or shut it down if the client was host
                 drop(game);
             }
+            RequestOpCode::Start => {
+                let mut client = sockets.get_mut(&client_id).unwrap();
+                if client.game.is_none() {
+                    let _ = client.send_error(ClientError::NotInGame("Client was not in a game"));
+                    return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
+                }
+
+                // Parse the request
+                let request: StartRequest = serde_json::from_value(self.d.unwrap())?;
+
+                client.game.as_mut().unwrap().start(available_tasks, request.task_count);
+            }
+            RequestOpCode::Task => {
+                let mut client = sockets.get_mut(&client_id).unwrap();
+                if client.game.is_none() {
+                    let _ = client.send_error(ClientError::NotInGame("Client was not in a game"));
+                    return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
+                }
+
+                // Parse the request
+                let request: TaskRequest = serde_json::from_value(self.d.unwrap())?;
+            },
+            
         }
 
         Ok(())
@@ -243,6 +284,8 @@ impl Request {
 pub enum RequestOpCode {
     Join,
     Leave,
+    Start,
+    Task,
 }
 
 impl OpCodeFetcher for Request {

@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use crossbeam::channel::{SendError, Sender};
 use r2d2::Pool;
@@ -11,7 +11,7 @@ use crate::service::{redis_pool::RedisConnectionManager, Sockets};
 
 use self::{
     error::ClientError,
-    game::Game,
+    game::{task::GameTask, Game},
     models::{hello::Hello, DefaultModel},
 };
 use message_handler::ClientMessageHandler;
@@ -85,6 +85,7 @@ impl SocketClient {
     pub async fn on_message(
         client_id: Uuid,
         redis_pool: Pool<RedisConnectionManager>,
+        available_tasks: Arc<Vec<GameTask>>,
         message: Message,
         shard_id: &str,
         sockets: Sockets,
@@ -99,7 +100,12 @@ impl SocketClient {
                 match model {
                     Ok(model) => {
                         if let Err(e) = ClientMessageHandler::handle_message(
-                            client_id, sockets, redis_pool, model, shard_id,
+                            client_id,
+                            sockets,
+                            redis_pool,
+                            available_tasks,
+                            model,
+                            shard_id,
                         ) {
                             error!("Error while handling message {}", e);
                             should_close = true;

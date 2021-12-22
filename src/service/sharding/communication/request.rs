@@ -12,7 +12,9 @@ use crate::service::{
 use self::{join::ShardJoinRequest, leave::ShardLeaveRequest};
 
 use super::{
-    response::{join::ShardJoinResponse, ShardResponse, ShardResponseOpCode, leave::ShardLeaveResponse},
+    response::{
+        join::ShardJoinResponse, leave::ShardLeaveResponse, ShardResponse, ShardResponseOpCode,
+    },
     ShardOpCode, ShardOpCodeFetcher,
 };
 
@@ -68,7 +70,36 @@ impl ShardRequest {
                     .game
                     .as_mut()
                     .ok_or(ServiceError::GameDoesNotExist)?;
-                game.register(PartialClient::new(request.client_id, request.shard_id.to_string(), false, None));
+                match game.register(PartialClient::new(
+                    request.client_id,
+                    request.shard_id.to_string(),
+                    false,
+                    None,
+                )) {
+                    Ok(_) => (),
+                    Err(_) => {
+                        // Serialize response
+                        let response = ShardResponse::new(
+                            ShardJoinResponse {
+                                game_id: request.game_id,
+                                host_id: request.host_id,
+                                client_id: request.client_id,
+                                shard_id: Uuid::from_str(&shard_id).unwrap(),
+                                success: false,
+                            },
+                            ShardResponseOpCode::Join,
+                        );
+
+                        // Send response to shard
+                        sharding::send_redis(
+                            &redis_pool,
+                            (Some(request.client_id), None),
+                            response,
+                            ShardOpCode::Response,
+                        )?;
+                        return Ok(());
+                    }
+                }
 
                 // Serialize response
                 let response = ShardResponse::new(
@@ -77,6 +108,7 @@ impl ShardRequest {
                         host_id: request.host_id,
                         client_id: request.client_id,
                         shard_id: Uuid::from_str(&shard_id).unwrap(),
+                        success: true,
                     },
                     ShardResponseOpCode::Join,
                 );
@@ -101,7 +133,7 @@ impl ShardRequest {
                     .as_mut()
                     .ok_or(ServiceError::GameDoesNotExist)?;
                 game.unregister(&request.client_id);
-            
+
                 // Serialize response
                 let response = ShardResponse::new(
                     ShardLeaveResponse {

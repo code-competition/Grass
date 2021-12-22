@@ -27,3 +27,5 @@ flexbuffers = "2.0.0"
 
 num_enum = "0.5.4"
 envy = "0.4.2"
+toml = "0.5.8"
+rand = "0.8.4"

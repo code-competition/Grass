@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use r2d2::Pool;
 use serde_json::Value;
 use uuid::Uuid;
@@ -8,7 +10,10 @@ use crate::service::{
     Sockets,
 };
 
-use super::models::{DefaultModel, OpCode};
+use super::{
+    game::task::GameTask,
+    models::{DefaultModel, OpCode},
+};
 
 pub struct ClientMessageHandler {}
 
@@ -17,6 +22,7 @@ impl ClientMessageHandler {
         client_id: Uuid,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
+        available_tasks: Arc<Vec<GameTask>>,
         model: DefaultModel<Value>,
         shard_id: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
@@ -36,11 +42,9 @@ impl ClientMessageHandler {
         match model.op {
             OpCode::Request => {
                 let request: Request = serde_json::from_value(data)?;
-                request.handle_message(client_id, sockets, redis_pool, shard_id)
+                request.handle_message(client_id, sockets, redis_pool, available_tasks, shard_id)
             }
-            _ => {
-                Err(Box::new(ClientError::InvalidOpCode))
-            }
+            _ => Err(Box::new(ClientError::InvalidOpCode)),
         }
     }
 }

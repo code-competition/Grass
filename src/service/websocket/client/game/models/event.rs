@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use crate::service::websocket::client::models::{OpCode, OpCodeFetcher};
 
 pub mod shutdown;
+pub mod start;
+pub mod task;
 
 /// Event sent to everyone in a game when a new client is connected (not sent to the client itself)
 pub mod connected_client;
@@ -32,6 +34,7 @@ impl<T> GameEvent<T> {
 pub enum GameEventOpCode {
     /// Event triggered when game ends or host decides to force shutdown it
     Shutdown,
+    Start,
 
     /// Event sent to everyone in a game when a new client is connected (not sent to the client itself)
     ConnectedClient,

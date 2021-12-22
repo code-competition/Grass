@@ -386,12 +386,14 @@ dependencies = [
  "log",
  "num_enum",
  "r2d2",
+ "rand",
  "redis",
  "serde",
  "serde_derive",
  "serde_json",
  "tokio",
  "tokio-tungstenite",
+ "toml",
  "uuid",
 ]
 

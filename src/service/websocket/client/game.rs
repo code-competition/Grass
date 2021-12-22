@@ -1,6 +1,7 @@
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, str::FromStr, sync::Arc};
 
 use r2d2::Pool;
+use rand::prelude::SliceRandom;
 use redis::Commands;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -17,8 +18,8 @@ use crate::service::{
     websocket::client::{
         game::models::{
             event::{connected_client::ConnectedClientGameEvent, shutdown::ShutdownGameEvent},
-            response::shutdown::ShutdownResponse,
-            GameEvent, Response,
+            response::{leave::LeaveResponse, shutdown::ShutdownResponse},
+            GameEvent, Response, ResponseOpCode,
         },
         models::DefaultModel,
     },
@@ -27,6 +28,7 @@ use crate::service::{
 
 use self::{
     models::event::disconnected_client::DisconnectedClientGameEvent, partial_client::PartialClient,
+    task::GameTask,
 };
 
 use super::error::ClientError;
@@ -34,6 +36,7 @@ use super::error::ClientError;
 pub mod models;
 pub mod partial_client;
 pub mod redis_game;
+pub mod task;
 
 #[derive(Debug, Clone)]
 pub struct Game {
@@ -58,6 +61,12 @@ pub struct Game {
 
     /// If the game has been shutdown already
     shutdown: bool,
+
+    /// If the game is open for registration
+    public: bool,
+
+    /// List of all tasks to finish before the game ends
+    tasks: Vec<GameTask>,
 }
 
 impl Game {
@@ -79,15 +88,28 @@ impl Game {
             redis_pool,
             shutdown: false,
             sockets,
+            public: true,
+            tasks: Vec::new(),
         }
     }
 
+    /// Starts the game for all clients
+    pub fn start(&mut self, available_tasks: Arc<Vec<GameTask>>, task_count: usize) {
+        self.public = false;
+
+        // Choose a random programming question
+        self.tasks = available_tasks
+            .choose_multiple(&mut rand::thread_rng(), task_count)
+            .map(|x| x.to_owned())
+            .collect();
+    }
+
     /// Register a new client with the game
-    pub fn register(&mut self, partial_client: PartialClient) {
+    pub fn register(&mut self, partial_client: PartialClient) -> Result<(), ()> {
         trace!("Registering client from game");
         // Cancel if user is not game host
-        if !self.is_host {
-            return;
+        if !self.is_host || !self.public {
+            return Err(());
         }
 
         // Send existing clients to the newly connected client
@@ -128,13 +150,22 @@ impl Game {
             .as_mut()
             .unwrap()
             .insert(partial_client.id, partial_client);
+
+        Ok(())
     }
 
     /// Unregister a client from the game
     pub fn unregister(&mut self, client_id: &Uuid) {
         trace!("Unregistering client from game");
         // Cancel if user is not game host
-        if self.is_host && self.connected_clients.as_mut().unwrap().remove(client_id).is_some() {
+        if self.is_host
+            && self
+                .connected_clients
+                .as_mut()
+                .unwrap()
+                .remove(client_id)
+                .is_some()
+        {
             // Send the disconnected client event to all connected clients
             let _ = self.send_global(
                 DefaultModel::new(GameEvent::new(DisconnectedClientGameEvent {
@@ -235,6 +266,14 @@ impl Drop for Game {
                     game.unregister(&self.partial_client.id);
                 }
             }
+
+            let _ = self.partial_client.send_message(
+                DefaultModel::new(Response::new(
+                    Some(LeaveResponse { success: true }),
+                    ResponseOpCode::Leave,
+                )),
+                &self.redis_pool,
+            );
         } else {
             info!("Leaving a game on another shard");
             // If the client is not host, disconnect it from the game

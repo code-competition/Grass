@@ -28,7 +28,12 @@ pub struct PartialClient {
 }
 
 impl PartialClient {
-    pub fn new(id: Uuid, shard_id: String, is_local: bool, write_channel: Option<Sender<Message>>) -> PartialClient {
+    pub fn new(
+        id: Uuid,
+        shard_id: String,
+        is_local: bool,
+        write_channel: Option<Sender<Message>>,
+    ) -> PartialClient {
         PartialClient {
             id,
             shard_id,

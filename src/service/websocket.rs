@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use futures::{future, SinkExt, StreamExt, TryStreamExt};
 use r2d2::Pool;
 use tokio::net::TcpStream;
 
-use self::client::SocketClient;
+use self::client::{game::task::GameTask, SocketClient};
 
 use super::{redis_pool::RedisConnectionManager, Sockets};
 
@@ -10,6 +12,7 @@ pub mod client;
 
 pub async fn accept_connection(
     stream: TcpStream,
+    available_tasks: Arc<Vec<GameTask>>,
     redis_pool: Pool<RedisConnectionManager>,
     sockets: Sockets,
     shard_id: String,
@@ -52,6 +55,7 @@ pub async fn accept_connection(
             match futures::executor::block_on(SocketClient::on_message(
                 client_id,
                 redis_pool.clone(),
+                available_tasks.clone(),
                 message,
                 &shard_id_message.clone(),
                 sockets.clone(),

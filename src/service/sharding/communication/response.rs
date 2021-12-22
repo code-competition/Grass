@@ -75,11 +75,24 @@ impl ShardResponse {
                         return Err(Box::new(ServiceError::CouldNotGetSocket));
                     }
                 };
+
                 if socket.game.is_some() {
                     socket.send_error(ClientError::AlreadyInGame("Client is already in a game"))?;
                     return Err(Box::new(ClientError::AlreadyInGame(
                         "Client was for some stupid reason already in a game",
                     )));
+                }
+
+                if !response.success {
+                    socket.send_model(DefaultModel::new(Response::new(
+                        Some(JoinResponse {
+                            game_id: response.game_id,
+                            is_host: false,
+                            success: false,
+                        }),
+                        ResponseOpCode::Join,
+                    )))?;
+                    return Ok(());
                 }
 
                 // Client successfully joined the game, give the client its game object
@@ -125,7 +138,6 @@ impl ShardResponse {
 
                 socket.send_model(DefaultModel::new(Response::new(
                     Some(LeaveResponse {
-                        game_id: response.game_id,
                         success: true,
                     }),
                     ResponseOpCode::Leave,

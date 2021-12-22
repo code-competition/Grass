@@ -9,4 +9,6 @@ pub struct ShardJoinResponse {
 
     /// Id of shard where the game is hosted
     pub(crate) shard_id: Uuid,
+
+    pub(crate) success: bool,
 }

@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::Path, sync::Arc};
 
 use dashmap::DashMap;
 use futures::{
@@ -6,18 +6,22 @@ use futures::{
     Future,
 };
 use r2d2::Pool;
+use redis::{ControlFlow, PubSubCommands};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
 use self::{
-    error::CriticalError, redis_pool::RedisConnectionManager,
-    sharding::communication::ShardDefaultModel, websocket::client::SocketClient,
+    error::CriticalError,
+    redis_pool::RedisConnectionManager,
+    sharding::communication::ShardDefaultModel,
+    websocket::client::{game::task::GameTask, SocketClient},
 };
 
 pub mod error;
 pub mod extended_select;
 pub mod redis_pool;
 pub mod sharding;
+pub mod task_loader;
 pub mod websocket;
 
 pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
@@ -37,7 +41,8 @@ pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
     └────► on received from other sharding ────► send to middleware
 */
 
-type ShardingMiddleware<F> = fn(String, Sockets, Pool<RedisConnectionManager>, ShardDefaultModel) -> F;
+type ShardingMiddleware<F> =
+    fn(String, Sockets, Pool<RedisConnectionManager>, ShardDefaultModel) -> F;
 
 pub struct MiddlewareManager<F>
 where
@@ -78,6 +83,9 @@ pub struct Service<'a> {
     // Redis connection pool
     redis_pool: Pool<RedisConnectionManager>,
 
+    // Available tasks
+    available_tasks: Arc<Vec<GameTask>>,
+
     // Error channel to trigger shutdown of service if something goes wrong
     error_channel: (
         Option<Sender<CriticalError>>,
@@ -86,13 +94,23 @@ pub struct Service<'a> {
 }
 
 impl<'a> Service<'a> {
-    pub async fn new(shard_id: &'a str, host_addr: &'a str, redis_addr: &'a str) -> Service<'a> {
+    pub async fn new(
+        shard_id: &'a str,
+        host_addr: &'a str,
+        game_loading_path: &Path,
+        redis_addr: &'a str,
+    ) -> Service<'a> {
         // Create redis connection poool
         let manager = RedisConnectionManager::new(redis_addr).unwrap();
         let redis_pool = r2d2::Pool::builder().build(manager).unwrap();
 
         // Initialize thread channel to handle critical errors that may occur inside the application
         let (error_tx, error_rx) = futures::channel::oneshot::channel::<CriticalError>();
+
+        // Load available tasks
+        let tasks = task_loader::load_tasks(
+            &std::fs::read_to_string(game_loading_path).expect("file not found"),
+        );
 
         Self {
             shard_id,
@@ -101,6 +119,8 @@ impl<'a> Service<'a> {
 
             connections: Arc::new(DashMap::new()),
             redis_pool,
+
+            available_tasks: Arc::new(tasks),
 
             error_channel: (Some(error_tx), Some(error_rx)),
         }
@@ -123,6 +143,7 @@ impl<'a> Service<'a> {
         // And redirects them into the function websocket::accept_connection(...)
         // TCP system works with tokio-tungstenite through tokios TcpListener
         let pool = redis_pool.clone();
+        let available_tasks = self.available_tasks.clone();
         let joinhandle_ws = tokio::spawn(async move {
             trace!("Launching socket shard");
             let try_socket = TcpListener::bind(&host_addr).await;
@@ -130,8 +151,10 @@ impl<'a> Service<'a> {
             info!("Socket shard listening on: {}", host_addr);
 
             while let Ok((stream, _)) = listener.accept().await {
+                let available_tasks = available_tasks.clone();
                 tokio::spawn(websocket::accept_connection(
                     stream,
+                    available_tasks,
                     pool.clone(),
                     socket_connections.clone(),
                     shard_id.to_string(),
@@ -150,51 +173,46 @@ impl<'a> Service<'a> {
         let joinhandle_presence = tokio::spawn(async move {
             // Opens a new redis connection outside the pool to leverage better connection speeds
             let client = redis::Client::open(redis_addr).expect("redis connection failed");
-            let mut _con = client
+            let mut con = client
                 .get_connection()
                 .expect("could not get redis connection");
 
             info!("shard id registered to pub/sub: {}", shard_id);
 
-            #[allow(clippy::empty_loop)]
-            loop {}
-
-            // ! Sharding is not a prioritized feature, might work on it if time allows
-
             // Subscribe to presence channel and receive messages from other sharding (socket servers)
-            // let local_shard_id = shard_id.clone();
-            // let _: () = con
-            //     .subscribe(&[shard_id], |msg| {
-            //         trace!("Receiving message from shard");
-            //         let local_middleware = middleware.clone();
-            //         let local_socket_connections = socket_connections.clone();
-            //         let local_pool = pool.clone();
-            //         let local_shard_id = local_shard_id.clone();
-            //         trace!("Parsing payload from shard message");
-            //         let payload: Vec<u8> = msg
-            //             .get_payload()
-            //             .expect("could not get pub/sub message payload");
-            //         trace!(
-            //             "Payload from shard message has length {} bytes",
-            //             payload.len()
-            //         );
+            let _local_shard_id = shard_id.clone();
+            let _: () = con
+                .subscribe(&[shard_id], |_msg| {
+                    // trace!("Receiving message from shard");
+                    // let local_middleware = middleware.clone();
+                    // let local_socket_connections = socket_connections.clone();
+                    // let local_pool = pool.clone();
+                    // let local_shard_id = local_shard_id.clone();
+                    // trace!("Parsing payload from shard message");
+                    // let payload: Vec<u8> = msg
+                    //     .get_payload()
+                    //     .expect("could not get pub/sub message payload");
+                    // trace!(
+                    //     "Payload from shard message has length {} bytes",
+                    //     payload.len()
+                    // );
 
-            //         // Todo: error handling
-            //         let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
-            //         let model = ShardDefaultModel::deserialize(payload).unwrap();
-            //         trace!("Deserialized payload and found opcode: {:?}", &model.op);
+                    // // Todo: error handling
+                    // let payload = flexbuffers::Reader::get_root(payload.as_slice()).unwrap();
+                    // let model = ShardDefaultModel::deserialize(payload).unwrap();
+                    // trace!("Deserialized payload and found opcode: {:?}", &model.op);
 
-            //         // Call middleware function and pass in the payload
-            //         futures::executor::block_on((local_middleware.function)(
-            //             local_shard_id,
-            //             local_socket_connections,
-            //             local_pool,
-            //             model,
-            //         ));
+                    // // Call middleware function and pass in the payload
+                    // futures::executor::block_on((local_middleware.function)(
+                    //     local_shard_id,
+                    //     local_socket_connections,
+                    //     local_pool,
+                    //     model,
+                    // ));
 
-            //         ControlFlow::Continue
-            //     })
-            //     .unwrap();
+                    ControlFlow::Continue
+                })
+                .unwrap();
         });
 
         // This custom select function exits when one of the futures returns,

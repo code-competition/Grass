@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use redis::Commands;
 use serde::Deserialize;
 use service::Service;
@@ -34,7 +36,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Err(_) => Config {
             address: "0.0.0.0".into(),
             port: 5000,
-            redis_addr: "redis://127.0.0.1:5374".into(),
+            redis_addr: "redis://127.0.0.1:35374".into(),
         },
     };
 
@@ -42,8 +44,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     if let Ok(config) = envy::from_env::<DebugConfig>() {
         if config.should_reset_redis {
-            let client = redis::Client::open(cfg.redis_addr.to_string())
-                .expect("redis connection failed");
+            let client =
+                redis::Client::open(cfg.redis_addr.to_string()).expect("redis connection failed");
             let mut con = client
                 .get_connection()
                 .expect("could not get redis connection");
@@ -57,7 +59,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize service
     let host_addr = format!("{}:{}", cfg.address, cfg.port);
-    let mut service = Service::new(&shard_id, &host_addr, &cfg.redis_addr).await;
+    let mut service = Service::new(
+        &shard_id,
+        &host_addr,
+        Path::new("./tasks.toml"),
+        &cfg.redis_addr,
+    )
+    .await;
 
     // Run until finished
     let middleware = MiddlewareManager::new(middleware::shard_payload_interceptor);
