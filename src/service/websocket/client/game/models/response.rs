@@ -5,6 +5,7 @@ use crate::service::websocket::client::models::{OpCodeFetcher, OpCode};
 pub mod join;
 pub mod leave;
 pub mod shutdown;
+pub mod task;
 
 // Models for responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,6 +25,7 @@ pub enum ResponseOpCode {
     Join,
     Leave,
     Shutdown,
+    Task,
 }
 
 impl<T> OpCodeFetcher for Response<T> {

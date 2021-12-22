@@ -23,14 +23,18 @@ use crate::service::{
     Sockets,
 };
 
-use self::{join::JoinRequest, start::StartRequest, task::TaskRequest};
+use self::{join::JoinRequest, start::StartRequest, task::TaskRequest, compile::CompileRequest};
 
-use super::{response::join::JoinResponse, Response, ResponseOpCode};
+use super::{
+    response::{join::JoinResponse, task::TaskResponse},
+    Response, ResponseOpCode,
+};
 
 pub mod join;
 pub mod leave;
 pub mod start;
 pub mod task;
+pub mod compile;
 
 // Models for requests
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -40,7 +44,7 @@ pub struct Request {
 }
 
 impl Request {
-    pub fn handle_message(
+    pub async fn handle_message(
         self,
         client_id: Uuid,
         sockets: Sockets,
@@ -226,7 +230,7 @@ impl Request {
                             ShardRequestOpCode::Join,
                         );
 
-                        // Send request to shard
+                        // Send join request to shard
                         sharding::send_redis(
                             &redis_pool,
                             (None, Some(Uuid::from_str(&redis_game.shard_id)?)),
@@ -253,7 +257,7 @@ impl Request {
             }
             RequestOpCode::Start => {
                 let mut client = sockets.get_mut(&client_id).unwrap();
-                if client.game.is_none() {
+                if client.game.is_none() && client.game.as_ref().unwrap().is_host {
                     let _ = client.send_error(ClientError::NotInGame("Client was not in a game"));
                     return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
                 }
@@ -261,10 +265,15 @@ impl Request {
                 // Parse the request
                 let request: StartRequest = serde_json::from_value(self.d.unwrap())?;
 
-                client.game.as_mut().unwrap().start(available_tasks, request.task_count);
+                // Start the game
+                client
+                    .game
+                    .as_mut()
+                    .unwrap()
+                    .start(available_tasks, request.task_count)?;
             }
             RequestOpCode::Task => {
-                let mut client = sockets.get_mut(&client_id).unwrap();
+                let client = sockets.get(&client_id).unwrap();
                 if client.game.is_none() {
                     let _ = client.send_error(ClientError::NotInGame("Client was not in a game"));
                     return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
@@ -272,8 +281,78 @@ impl Request {
 
                 // Parse the request
                 let request: TaskRequest = serde_json::from_value(self.d.unwrap())?;
-            },
+
+                let host_id = client.game.as_ref().unwrap().partial_host.id;
+                if let Some(host) = sockets.get(&host_id) {
+                    if let Some(game) = &host.game {
+                        match game.get_task_indexed(request.task_index) {
+                            Ok(task) => {
+                                client.send_model(DefaultModel::new(Response::new(
+                                    Some(TaskResponse {
+                                        task: task.to_owned(),
+                                    }),
+                                    ResponseOpCode::Task,
+                                )))?;
+                            }
+                            Err(e) => match e {
+                                Some(_) => {
+                                    let error = ClientError::OutOfRangeTask;
+                                    let _ = client.send_error(error.clone());
+                                    return Err(Box::new(error));
+                                }
+                                None => {
+                                    let error = ClientError::GameNotStarted;
+                                    let _ = client.send_error(error.clone());
+                                    return Err(Box::new(error));
+                                }
+                            },
+                        }
+                    } else {
+                        let _ = client.send_error(ClientError::InternalServerError(
+                            "Host was not in the same game",
+                        ));
+                        return Err(Box::new(ClientError::InternalServerError(
+                            "Host was not in the same game",
+                        )));
+                    }
+                } else {
+                    let _ =
+                        client.send_error(ClientError::InternalServerError("Host does not exist"));
+                    return Err(Box::new(ClientError::InternalServerError(
+                        "Host does not exist",
+                    )));
+                }
+            }
+            RequestOpCode::Compile => {
+                let client = sockets.get(&client_id).unwrap();
+                if client.game.is_none() {
+                    let _ = client.send_error(ClientError::NotInGame("Client was not in a game"));
+                    return Err(Box::new(ClientError::NotInGame("Client was not in a game")));
+                }
+
+                let request: CompileRequest = serde_json::from_value(self.d.unwrap())?;
             
+                let host_id = client.game.as_ref().unwrap().partial_host.id;
+                if let Some(mut host) = sockets.get_mut(&host_id) {
+                    if let Some(game) = &mut host.game {
+                        let result = game.compile_code(&client_id, request.code).await;
+                        println!("{:?}", (result));
+                    } else {
+                        let _ = client.send_error(ClientError::InternalServerError(
+                            "Host was not in the game",
+                        ));
+                        return Err(Box::new(ClientError::InternalServerError(
+                            "Host was not in the game",
+                        )));
+                    }
+                } else {
+                    let _ =
+                        client.send_error(ClientError::InternalServerError("Host does not exist"));
+                    return Err(Box::new(ClientError::InternalServerError(
+                        "Host does not exist",
+                    )));
+                }
+            },
         }
 
         Ok(())
@@ -286,6 +365,7 @@ pub enum RequestOpCode {
     Leave,
     Start,
     Task,
+    Compile,
 }
 
 impl OpCodeFetcher for Request {

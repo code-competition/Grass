@@ -106,7 +106,7 @@ impl SocketClient {
                             available_tasks,
                             model,
                             shard_id,
-                        ) {
+                        ).await {
                             error!("Error while handling message {}", e);
                             should_close = true;
                         }

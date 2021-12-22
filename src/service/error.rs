@@ -7,6 +7,7 @@ use std::{
 pub enum ServiceError {
     CouldNotGetSocket,
     GameDoesNotExist,
+    InternalServerError,
 }
 
 impl fmt::Display for ServiceError {

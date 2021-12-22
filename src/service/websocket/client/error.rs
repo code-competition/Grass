@@ -13,7 +13,9 @@ pub enum ClientError<'a> {
     InternalServerError(&'a str),
     NotGameHost(&'a str),
     NoDataWithOpCode(&'a str),
+    OutOfRangeTask,
     NoGameWasFound,
+    GameNotStarted,
     InvalidGameID,
     InvalidOpCode,
 }

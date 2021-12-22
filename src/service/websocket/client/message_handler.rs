@@ -18,7 +18,7 @@ use super::{
 pub struct ClientMessageHandler {}
 
 impl ClientMessageHandler {
-    pub fn handle_message(
+    pub async fn handle_message(
         client_id: Uuid,
         sockets: Sockets,
         redis_pool: Pool<RedisConnectionManager>,
@@ -42,7 +42,7 @@ impl ClientMessageHandler {
         match model.op {
             OpCode::Request => {
                 let request: Request = serde_json::from_value(data)?;
-                request.handle_message(client_id, sockets, redis_pool, available_tasks, shard_id)
+                request.handle_message(client_id, sockets, redis_pool, available_tasks, shard_id).await
             }
             _ => Err(Box::new(ClientError::InvalidOpCode)),
         }

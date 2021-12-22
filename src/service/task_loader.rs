@@ -9,8 +9,5 @@ pub struct FileTaskList {
 
 pub fn load_tasks(toml: &str) -> Vec<GameTask> {
     let tasks: FileTaskList = toml::from_str(toml).unwrap();
-
-    println!("{:#?}", (tasks));
-
-    Vec::new()
+    tasks.tasks
 }

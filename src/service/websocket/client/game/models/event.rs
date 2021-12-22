@@ -34,7 +34,9 @@ impl<T> GameEvent<T> {
 pub enum GameEventOpCode {
     /// Event triggered when game ends or host decides to force shutdown it
     Shutdown,
+
     Start,
+    Task,
 
     /// Event sent to everyone in a game when a new client is connected (not sent to the client itself)
     ConnectedClient,

@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::service::{
+    error::ServiceError,
     redis_pool::RedisConnectionManager,
     sharding::{
         self,
@@ -27,8 +28,12 @@ use crate::service::{
 };
 
 use self::{
-    models::event::disconnected_client::DisconnectedClientGameEvent, partial_client::PartialClient,
-    task::GameTask,
+    models::event::{
+        disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent,
+        task::TaskGameEvent,
+    },
+    partial_client::PartialClient,
+    task::GameTask, sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest},
 };
 
 use super::error::ClientError;
@@ -37,6 +42,11 @@ pub mod models;
 pub mod partial_client;
 pub mod redis_game;
 pub mod task;
+
+pub mod sandbox {
+    tonic::include_proto!("sandbox");
+}
+
 
 #[derive(Debug, Clone)]
 pub struct Game {
@@ -61,6 +71,9 @@ pub struct Game {
 
     /// If the game has been shutdown already
     shutdown: bool,
+
+    /// If the game is started, competition is active
+    is_started: bool,
 
     /// If the game is open for registration
     public: bool,
@@ -87,6 +100,7 @@ impl Game {
             connected_clients,
             redis_pool,
             shutdown: false,
+            is_started: false,
             sockets,
             public: true,
             tasks: Vec::new(),
@@ -94,7 +108,11 @@ impl Game {
     }
 
     /// Starts the game for all clients
-    pub fn start(&mut self, available_tasks: Arc<Vec<GameTask>>, task_count: usize) {
+    pub fn start(
+        &mut self,
+        available_tasks: Arc<Vec<GameTask>>,
+        task_count: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         self.public = false;
 
         // Choose a random programming question
@@ -102,6 +120,56 @@ impl Game {
             .choose_multiple(&mut rand::thread_rng(), task_count)
             .map(|x| x.to_owned())
             .collect();
+
+        // Verify that the tasks have been filled up
+        if self.tasks.len() != task_count {
+            return Err(Box::new(ServiceError::InternalServerError));
+        }
+
+        // Get the first task to send to all clients
+        let task = self.get_task_indexed(0).unwrap();
+
+        // Send game start notice to all clients
+        let _ = self.send_global(
+            DefaultModel::new(GameEvent::new(StartGameEvent { task_count })),
+            &self.redis_pool,
+        );
+
+        // Send the first task to all clients
+        let _ = self.send_global(
+            DefaultModel::new(GameEvent::new(TaskGameEvent {
+                task: task.to_owned(),
+            })),
+            &self.redis_pool,
+        );
+
+        Ok(())
+    }
+
+    /// Compile client code and return result
+    pub async fn compile_code(&mut self, client_id: &Uuid, code: String) -> Result<(), Box<dyn std::error::Error>> {
+        let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051").await?;
+
+        let request = tonic::Request::new(SandboxRequest {
+            user_id: client_id.to_string(),
+            code,
+            language: sandbox::Language::Rust as i32,
+        });
+    
+        let response = client.compile(request).await?;
+
+        println!("{:?}", (response));
+
+        Ok(())
+    }
+
+    /// Fetches a task at index
+    pub fn get_task_indexed(&self, index: usize) -> Result<&GameTask, Option<()>> {
+        if !self.is_started {
+            Ok(self.tasks.get(index).ok_or(Some(()))?)
+        } else {
+            Err(None)
+        }
     }
 
     /// Register a new client with the game
@@ -195,7 +263,8 @@ impl Game {
             .ok_or(ClientError::InternalServerError("not host"))?
             .iter()
         {
-            clients.1.send_message(message.clone(), redis_pool)?;
+            // Todo: Better error handling when it fails to send message to client
+            let _ = clients.1.send_message(message.clone(), redis_pool);
         }
 
         // Send message to host
