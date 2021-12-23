@@ -20,13 +20,13 @@ pub struct ClientMessageHandler {}
 impl ClientMessageHandler {
     pub async fn handle_message(
         client_id: Uuid,
-        sockets: Sockets,
+        sockets: &Sockets,
         redis_pool: Pool<RedisConnectionManager>,
         available_tasks: Arc<Vec<GameTask>>,
-        model: DefaultModel<Value>,
+        model: &DefaultModel<Value>,
         shard_id: &str,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let data = if let Some(data) = model.d {
+        let data = if let Some(data) = model.d.to_owned() {
             data
         } else {
             return Err(Box::new(ClientError::NoDataWithOpCode(

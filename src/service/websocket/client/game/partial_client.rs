@@ -1,8 +1,6 @@
-use std::time::Duration;
-
-use crossbeam::channel::Sender;
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
@@ -24,7 +22,7 @@ pub struct PartialClient {
     pub(crate) is_local: bool,
 
     /// Only available on local sockets, prevents deadlocking within games
-    pub(crate) write_channel: Option<Sender<Message>>,
+    pub(crate) write_channel: Option<UnboundedSender<Message>>,
 }
 
 impl PartialClient {
@@ -32,7 +30,7 @@ impl PartialClient {
         id: Uuid,
         shard_id: String,
         is_local: bool,
-        write_channel: Option<Sender<Message>>,
+        write_channel: Option<UnboundedSender<Message>>,
     ) -> PartialClient {
         PartialClient {
             id,
@@ -51,10 +49,10 @@ impl PartialClient {
         T: Serialize + Deserialize<'a>,
     {
         if self.is_local {
-            self.write_channel.as_ref().unwrap().send_timeout(
-                Message::Text(serde_json::to_string(&message).unwrap()),
-                Duration::from_secs(2),
-            )?;
+            self.write_channel
+                .as_ref()
+                .unwrap()
+                .send(Message::Text(serde_json::to_string(&message).unwrap()))?;
         } else {
             sharding::send_redis(
                 redis_pool,

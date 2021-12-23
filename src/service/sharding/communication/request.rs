@@ -52,7 +52,7 @@ impl ShardRequest {
         T::deserialize(r).unwrap()
     }
 
-    pub fn handle(
+    pub async fn handle(
         self,
         shard_id: String,
         sockets: Sockets,
@@ -63,7 +63,8 @@ impl ShardRequest {
                 let request = self.data::<ShardJoinRequest>();
 
                 // Register the client on the host
-                let mut game_host = sockets
+                let mut s = sockets.write().await;
+                let game_host = s
                     .get_mut(&request.host_id)
                     .ok_or(ServiceError::CouldNotGetSocket)?;
                 let game = game_host
@@ -125,7 +126,8 @@ impl ShardRequest {
                 let request = self.data::<ShardLeaveRequest>();
 
                 // Register the client on the host
-                let mut game_host = sockets
+                let mut s = sockets.write().await;
+                let game_host = s
                     .get_mut(&request.host_id)
                     .ok_or(ServiceError::CouldNotGetSocket)?;
                 let game = game_host

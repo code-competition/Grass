@@ -33,7 +33,8 @@ use self::{
         task::TaskGameEvent,
     },
     partial_client::PartialClient,
-    task::GameTask, sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest},
+    sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest},
+    task::GameTask,
 };
 
 use super::error::ClientError;
@@ -46,7 +47,6 @@ pub mod task;
 pub mod sandbox {
     tonic::include_proto!("sandbox");
 }
-
 
 #[derive(Debug, Clone)]
 pub struct Game {
@@ -147,7 +147,11 @@ impl Game {
     }
 
     /// Compile client code and return result
-    pub async fn compile_code(&mut self, client_id: &Uuid, code: String) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn compile_code(
+        &mut self,
+        client_id: &Uuid,
+        code: String,
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051").await?;
 
         let request = tonic::Request::new(SandboxRequest {
@@ -155,7 +159,7 @@ impl Game {
             code,
             language: sandbox::Language::Rust as i32,
         });
-    
+
         let response = client.compile(request).await?;
 
         println!("{:?}", (response));
@@ -330,7 +334,9 @@ impl Drop for Game {
             let _: () = conn.del(format!("GAME:{}", self.game_id)).unwrap();
         } else if self.partial_host.is_local {
             info!("Leaving game, the host is local");
-            if let Some(host_client) = &mut self.sockets.get_mut(&self.partial_host.id) {
+            if let Some(host_client) = &mut futures::executor::block_on(self.sockets.write())
+                .get_mut(&self.partial_host.id)
+            {
                 if let Some(game) = &mut host_client.game {
                     game.unregister(&self.partial_client.id);
                 }

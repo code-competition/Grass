@@ -67,6 +67,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await;
 
+    fn x() {
+        fn y() {
+           fn z() {
+               fn n() {
+                   fn m() {
+                       
+                   }
+               }
+           }
+        }
+    }
+
     // Run until finished
     let middleware = MiddlewareManager::new(middleware::shard_payload_interceptor);
     service.run(middleware).await

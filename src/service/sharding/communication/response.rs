@@ -57,7 +57,7 @@ impl ShardResponse {
         T::deserialize(r).unwrap()
     }
 
-    pub fn handle(
+    pub async fn handle(
         self,
         shard_id: String,
         sockets: Sockets,
@@ -68,7 +68,8 @@ impl ShardResponse {
                 let response = self.data::<ShardJoinResponse>();
 
                 // Register the game on the client
-                let socket = sockets.get_mut(&response.client_id);
+                let mut s = sockets.write().await;
+                let socket = s.get_mut(&response.client_id);
                 let mut socket = match socket {
                     Some(socket) => socket,
                     None => {
@@ -103,7 +104,7 @@ impl ShardResponse {
                         response.client_id,
                         shard_id,
                         true,
-                        Some(socket.socket_channel.clone()),
+                        Some(socket.send_channel.clone()),
                     ),
                     PartialClient::new(
                         response.host_id,
@@ -128,7 +129,8 @@ impl ShardResponse {
                 let response = self.data::<ShardLeaveResponse>();
                 println!("{:?}", (response));
 
-                let socket = sockets.get(&response.client_id);
+                let s = sockets.read().await;
+                let socket = s.get(&response.client_id);
                 let socket = match socket {
                     Some(socket) => socket,
                     None => {
@@ -137,9 +139,7 @@ impl ShardResponse {
                 };
 
                 socket.send_model(DefaultModel::new(Response::new(
-                    Some(LeaveResponse {
-                        success: true,
-                    }),
+                    Some(LeaveResponse { success: true }),
                     ResponseOpCode::Leave,
                 )))?;
             }

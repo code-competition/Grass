@@ -1,13 +1,19 @@
 use std::{net::SocketAddr, sync::Arc};
 
-use crossbeam::channel::{SendError, Sender};
 use r2d2::Pool;
 use redis::Commands;
 use serde_json::Value;
+use tokio::sync::mpsc::error::SendError;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
-use crate::service::{redis_pool::RedisConnectionManager, Sockets};
+use crate::service::{
+    redis_pool::RedisConnectionManager,
+    websocket::client::game::models::{
+        response::timeout::TimeoutResponse, Response, ResponseOpCode,
+    },
+    Sockets,
+};
 
 use self::{
     error::ClientError,
@@ -15,6 +21,8 @@ use self::{
     models::{hello::Hello, DefaultModel},
 };
 use message_handler::ClientMessageHandler;
+
+use super::SocketSender;
 
 pub mod error;
 pub mod game;
@@ -25,18 +33,18 @@ pub mod models;
 pub struct SocketClient {
     pub(crate) id: Uuid,
     addr: SocketAddr,
-    pub(crate) socket_channel: Sender<Message>,
+    pub(crate) send_channel: SocketSender,
 
     // Some(...) if user is in a game
     pub(crate) game: Option<Game>,
 }
 
 impl SocketClient {
-    pub fn new(addr: SocketAddr, socket_channel: Sender<Message>) -> SocketClient {
+    pub fn new(addr: SocketAddr, send_channel: SocketSender) -> SocketClient {
         SocketClient {
             id: uuid::Uuid::new_v4(),
             addr,
-            socket_channel,
+            send_channel,
             game: None,
         }
     }
@@ -99,31 +107,58 @@ impl SocketClient {
                     serde_json::from_str(&text);
                 match model {
                     Ok(model) => {
-                        if let Err(e) = ClientMessageHandler::handle_message(
-                            client_id,
-                            sockets,
-                            redis_pool,
-                            available_tasks,
-                            model,
-                            shard_id,
-                        ).await {
-                            error!("Error while handling message {}", e);
-                            should_close = true;
+                        match tokio::time::timeout(
+                            std::time::Duration::from_millis(500),
+                            ClientMessageHandler::handle_message(
+                                client_id,
+                                &sockets,
+                                redis_pool,
+                                available_tasks,
+                                &model,
+                                shard_id,
+                            ),
+                        )
+                        .await
+                        {
+                            Ok(res) => {
+                                if let Err(e) = res {
+                                    error!("Error while handling message {}", e);
+                                    should_close = true;
+                                }
+                            }
+                            Err(e) => {
+                                let client = sockets.read().await.get(&client_id).unwrap().clone();
+                                client.send_model(DefaultModel::new(Response::new(
+                                    Some(TimeoutResponse::new(model)),
+                                    ResponseOpCode::Timeout,
+                                )))?;
+                                trace!("handle_message timed out, {}", e);
+                            }
                         }
                     }
                     Err(e) => {
                         error!("Client reached an error {:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
-                        sockets.get(&client_id).unwrap().send_error(
+                        sockets.read().await.get(&client_id).unwrap().send_error(
                             ClientError::InvalidMessage("Invalid model, closing connection."),
                         )?;
                     }
                 }
             }
-            Message::Ping(bin) => sockets.get(&client_id).unwrap().send(Message::Pong(bin))?,
+            Message::Ping(bin) => sockets
+                .read()
+                .await
+                .get(&client_id)
+                .unwrap()
+                .send(Message::Pong(bin))?,
             Message::Pong(bin) => {
-                sockets.get(&client_id).unwrap().send(Message::Ping(bin))?;
+                sockets
+                    .read()
+                    .await
+                    .get(&client_id)
+                    .unwrap()
+                    .send(Message::Ping(bin))?;
             }
             Message::Close(reason) => {
                 info!("Received close message: {:?}", reason);
@@ -153,18 +188,12 @@ impl SocketClient {
     /// Sends a raw websocket message
     #[inline]
     pub fn send(&self, message: Message) -> Result<(), SendError<Message>> {
-        self.socket_channel().send(message)
+        self.send_channel.send(message)
     }
 
     /// Get a reference to the socket client's id.
     #[inline]
     pub fn id(&self) -> &Uuid {
         &self.id
-    }
-
-    /// Get a reference to the socket client's socket channel.
-    #[inline]
-    pub fn socket_channel(&self) -> &Sender<Message> {
-        &self.socket_channel
     }
 }

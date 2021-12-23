@@ -1,13 +1,12 @@
-use std::{path::Path, sync::Arc};
+use std::{path::Path, sync::Arc, collections::HashMap};
 
-use dashmap::DashMap;
 use futures::{
     channel::oneshot::{Receiver, Sender},
     Future,
 };
 use r2d2::Pool;
 use redis::{ControlFlow, PubSubCommands};
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, sync::RwLock};
 use uuid::Uuid;
 
 use self::{
@@ -24,7 +23,7 @@ pub mod sharding;
 pub mod task_loader;
 pub mod websocket;
 
-pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
+pub type Sockets = Arc<RwLock<HashMap<Uuid, SocketClient>>>;
 
 /*
     # Flow chart of the websocket part of this service
@@ -117,7 +116,7 @@ impl<'a> Service<'a> {
             host_addr,
             redis_addr,
 
-            connections: Arc::new(DashMap::new()),
+            connections: Arc::new(RwLock::new(HashMap::new())),
             redis_pool,
 
             available_tasks: Arc::new(tasks),

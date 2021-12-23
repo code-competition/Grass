@@ -2,13 +2,16 @@ use std::sync::Arc;
 
 use futures::{future, SinkExt, StreamExt, TryStreamExt};
 use r2d2::Pool;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::mpsc::UnboundedSender};
+use tokio_tungstenite::tungstenite::Message;
 
 use self::client::{game::task::GameTask, SocketClient};
 
 use super::{redis_pool::RedisConnectionManager, Sockets};
 
 pub mod client;
+
+type SocketSender = UnboundedSender<Message>;
 
 pub async fn accept_connection(
     stream: TcpStream,
@@ -34,55 +37,51 @@ pub async fn accept_connection(
     let (mut write, read) = ws_stream.split();
 
     // Create channel for communication from reader to writer
-    let (sender, receiver) = crossbeam::channel::unbounded();
+    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
 
     // Register socket client
     let client = SocketClient::new(addr, sender.clone());
-    sockets.insert(*client.id(), client.clone());
+    sockets.write().await.insert(*client.id(), client.clone());
 
     // Prepare reader task
     // This task reads all incoming messages from the **CLIENT** coming through the TcpListener
     let shard_id_message = shard_id.clone();
-    let read_channel = read
-        .try_filter(|message| future::ready(!message.is_close()))
-        .try_for_each(|message| {
-            trace!("Received a messagrom from websocket, reading it...");
-            // Get the client id
-            let client_id = *client.id();
+    let read_channel = read.try_for_each(|message| {
+        trace!("Received a message from websocket, reading it...");
+        // Get the client id
+        let client_id = *client.id();
 
-            // Trigger on_message(...) event
-            info!("Triggering on_message event for client");
-            match futures::executor::block_on(SocketClient::on_message(
-                client_id,
-                redis_pool.clone(),
-                available_tasks.clone(),
-                message,
-                &shard_id_message.clone(),
-                sockets.clone(),
-            )) {
-                Ok(should_close) => {
-                    if should_close {
-                        trace!("Reached an should_close point, disconnecting socket.");
-                        return future::err(
-                            tokio_tungstenite::tungstenite::Error::ConnectionClosed,
-                        );
-                    }
-                }
-                Err(e) => {
-                    error!("Failed to parse message socket: {}", e);
+        // Trigger on_message(...) event
+        info!("Triggering on_message event for client");
+        match futures::executor::block_on(SocketClient::on_message(
+            client_id,
+            redis_pool.clone(),
+            available_tasks.clone(),
+            message,
+            &shard_id_message.clone(),
+            sockets.clone(),
+        )) {
+            Ok(should_close) => {
+                if should_close {
+                    trace!("Reached an should_close point, disconnecting socket.");
+                    return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
                 }
             }
+            Err(e) => {
+                error!("Failed to parse message socket: {}", e);
+            }
+        }
 
-            info!("on_message event was successfully finished");
-            future::ok(())
-        });
+        info!("on_message event was successfully finished");
+        future::ok(())
+    });
 
     // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
     let write_channel = tokio::spawn(async move {
         loop {
             trace!("Ready to receive message from internal write channel");
-            match receiver.recv() {
-                Ok(message) => match write.send(message).await {
+            match receiver.recv().await {
+                Some(message) => match write.send(message).await {
                     Ok(_) => {
                         trace!("Sent to websocket");
                     }
@@ -93,7 +92,7 @@ pub async fn accept_connection(
                         );
                     }
                 },
-                Err(_) => {
+                None => {
                     info!("No more senders are active, terminating socket");
                     break;
                 }
@@ -103,12 +102,16 @@ pub async fn accept_connection(
 
     // Trigger on open event for socket client
     sockets
+        .write()
+        .await
         .get_mut(client.id())
         .expect("socket connection does not exist")
         .on_open();
 
     // Registers the socket in the global datastore of sockets
     let res = sockets
+        .read()
+        .await
         .get(client.id())
         .expect("socket connection does not exist")
         .register(&redis_pool, shard_id);
@@ -119,7 +122,7 @@ pub async fn accept_connection(
                 "An error occured while registering user on the global socket datastore: {}",
                 e
             );
-            sockets.remove(client.id());
+            sockets.write().await.remove(client.id());
         }
     }
 
@@ -129,12 +132,16 @@ pub async fn accept_connection(
 
     // Trigger on close event
     sockets
+        .write()
+        .await
         .get_mut(client.id())
         .expect("socket connection does not exist")
         .on_close();
 
     // Unregisters the socket in the global datastore of sockets
     let res = sockets
+        .read()
+        .await
         .get(client.id())
         .expect("socket connection does not exist")
         .unregister(&redis_pool);
@@ -150,6 +157,6 @@ pub async fn accept_connection(
     }
 
     // Remove the socket locally
-    sockets.remove(client.id());
+    sockets.write().await.remove(client.id());
     info!("Socket disconnected: {}", addr);
 }
