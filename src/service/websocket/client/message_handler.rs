@@ -18,20 +18,20 @@ use super::{
 pub struct ClientMessageHandler {}
 
 impl ClientMessageHandler {
-    pub async fn handle_message(
+    pub async fn handle_message<'a>(
         client_id: Uuid,
         sockets: &Sockets,
         redis_pool: Pool<RedisConnectionManager>,
         available_tasks: Arc<Vec<GameTask>>,
         model: &DefaultModel<Value>,
         shard_id: &str,
-    ) -> Result<(), Box<dyn std::error::Error>> {
+    ) -> Result<(), ClientError<'a>> {
         let data = if let Some(data) = model.d.to_owned() {
             data
         } else {
-            return Err(Box::new(ClientError::NoDataWithOpCode(
+            return Err(ClientError::NoDataWithOpCode(
                 "No data was sent with opcode",
-            )));
+            ));
         };
 
         trace!(
@@ -41,10 +41,13 @@ impl ClientMessageHandler {
 
         match model.op {
             OpCode::Request => {
-                let request: Request = serde_json::from_value(data)?;
-                request.handle_message(client_id, sockets, redis_pool, available_tasks, shard_id).await
+                let request: Request =
+                    serde_json::from_value(data).map_err(|_| ClientError::ParsingError)?;
+                request
+                    .handle_message(client_id, sockets, redis_pool, available_tasks, shard_id)
+                    .await
             }
-            _ => Err(Box::new(ClientError::InvalidOpCode)),
+            _ => Err(ClientError::InvalidOpCode),
         }
     }
 }

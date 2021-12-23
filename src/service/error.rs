@@ -1,22 +1,7 @@
 use std::{
     error::Error,
-    fmt::{Display, Formatter, self},
+    fmt::{Display, Formatter},
 };
-
-#[derive(Debug, Clone)]
-pub enum ServiceError {
-    CouldNotGetSocket,
-    GameDoesNotExist,
-    InternalServerError,
-}
-
-impl fmt::Display for ServiceError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error \"{:?}\"", self)
-    }
-}
-
-impl std::error::Error for ServiceError {}
 
 #[derive(Debug, Clone, Copy)]
 pub struct CriticalError {

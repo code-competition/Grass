@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use futures::{future, SinkExt, StreamExt, TryStreamExt};
 use r2d2::Pool;
-use tokio::{net::TcpStream, sync::mpsc::UnboundedSender};
+use tokio::{net::TcpStream, sync::mpsc::Sender};
 use tokio_tungstenite::tungstenite::Message;
 
 use self::client::{game::task::GameTask, SocketClient};
@@ -11,7 +11,7 @@ use super::{redis_pool::RedisConnectionManager, Sockets};
 
 pub mod client;
 
-type SocketSender = UnboundedSender<Message>;
+type SocketSender = Sender<Message>;
 
 pub async fn accept_connection(
     stream: TcpStream,
@@ -37,7 +37,7 @@ pub async fn accept_connection(
     let (mut write, read) = ws_stream.split();
 
     // Create channel for communication from reader to writer
-    let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
+    let (sender, mut receiver) = tokio::sync::mpsc::channel(200);
 
     // Register socket client
     let client = SocketClient::new(addr, sender.clone());
@@ -45,35 +45,52 @@ pub async fn accept_connection(
 
     // Prepare reader task
     // This task reads all incoming messages from the **CLIENT** coming through the TcpListener
-    let shard_id_message = shard_id.clone();
-    let read_channel = read.try_for_each(|message| {
-        trace!("Received a message from websocket, reading it...");
-        // Get the client id
-        let client_id = *client.id();
+    let local_shard_id_message = shard_id.clone();
+    let local_client_id = *client.id();
+    let local_redis_pool = redis_pool.clone();
+    let local_available_tasks = available_tasks.clone();
+    let local_sockets = sockets.clone();
+    let read_channel = tokio::spawn(async move {
+        let mut read_channel = read
+            .try_filter(|message| future::ready(!message.is_close()))
+            .enumerate();
 
-        // Trigger on_message(...) event
-        info!("Triggering on_message event for client");
-        match futures::executor::block_on(SocketClient::on_message(
-            client_id,
-            redis_pool.clone(),
-            available_tasks.clone(),
-            message,
-            &shard_id_message.clone(),
-            sockets.clone(),
-        )) {
-            Ok(should_close) => {
-                if should_close {
-                    trace!("Reached an should_close point, disconnecting socket.");
-                    return future::err(tokio_tungstenite::tungstenite::Error::ConnectionClosed);
+        loop {
+            match read_channel.next().await {
+                Some(s) => match s.1 {
+                    Ok(message) => {
+                        // Trigger on_message(...) event
+                        info!("Triggering on_message event for client");
+                        match SocketClient::on_message(
+                            local_client_id,
+                            local_redis_pool.clone(),
+                            local_available_tasks.clone(),
+                            message,
+                            local_shard_id_message.clone(),
+                            local_sockets.clone(),
+                        )
+                        .await
+                        {
+                            Ok(should_close) => {
+                                if should_close {
+                                    trace!("Reached an should_close point, disconnecting socket.");
+                                    return tokio_tungstenite::tungstenite::Error::ConnectionClosed;
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to parse message socket: {}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Message reading error {}", e);
+                    }
+                },
+                None => {
+                    return tokio_tungstenite::tungstenite::Error::ConnectionClosed;
                 }
             }
-            Err(e) => {
-                error!("Failed to parse message socket: {}", e);
-            }
         }
-
-        info!("on_message event was successfully finished");
-        future::ok(())
     });
 
     // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
@@ -106,7 +123,8 @@ pub async fn accept_connection(
         .await
         .get_mut(client.id())
         .expect("socket connection does not exist")
-        .on_open();
+        .on_open()
+        .await;
 
     // Registers the socket in the global datastore of sockets
     let res = sockets

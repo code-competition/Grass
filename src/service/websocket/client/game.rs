@@ -1,4 +1,4 @@
-use std::{collections::HashMap, str::FromStr, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use r2d2::Pool;
 use rand::prelude::SliceRandom;
@@ -7,15 +7,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::service::{
-    error::ServiceError,
     redis_pool::RedisConnectionManager,
-    sharding::{
-        self,
-        communication::{
-            request::{leave::ShardLeaveRequest, ShardRequest, ShardRequestOpCode},
-            ShardOpCode,
-        },
-    },
     websocket::client::{
         game::models::{
             event::{connected_client::ConnectedClientGameEvent, shutdown::ShutdownGameEvent},
@@ -108,7 +100,7 @@ impl Game {
     }
 
     /// Starts the game for all clients
-    pub fn start(
+    pub async fn start(
         &mut self,
         available_tasks: Arc<Vec<GameTask>>,
         task_count: usize,
@@ -123,25 +115,29 @@ impl Game {
 
         // Verify that the tasks have been filled up
         if self.tasks.len() != task_count {
-            return Err(Box::new(ServiceError::InternalServerError));
+            return Err(Box::new(ClientError::InternalServerError("Internal server error, requested task count could not be filled")));
         }
 
         // Get the first task to send to all clients
         let task = self.get_task_indexed(0).unwrap();
 
         // Send game start notice to all clients
-        let _ = self.send_global(
-            DefaultModel::new(GameEvent::new(StartGameEvent { task_count })),
-            &self.redis_pool,
-        );
+        let _ = self
+            .send_global(
+                DefaultModel::new(GameEvent::new(StartGameEvent { task_count })),
+                &self.redis_pool,
+            )
+            .await;
 
         // Send the first task to all clients
-        let _ = self.send_global(
-            DefaultModel::new(GameEvent::new(TaskGameEvent {
-                task: task.to_owned(),
-            })),
-            &self.redis_pool,
-        );
+        let _ = self
+            .send_global(
+                DefaultModel::new(GameEvent::new(TaskGameEvent {
+                    task: task.to_owned(),
+                })),
+                &self.redis_pool,
+            )
+            .await;
 
         Ok(())
     }
@@ -177,7 +173,7 @@ impl Game {
     }
 
     /// Register a new client with the game
-    pub fn register(&mut self, partial_client: PartialClient) -> Result<(), ()> {
+    pub async fn register(&mut self, partial_client: PartialClient) -> Result<(), ()> {
         trace!("Registering client from game");
         // Cancel if user is not game host
         if !self.is_host || !self.public {
@@ -186,38 +182,45 @@ impl Game {
 
         // Send existing clients to the newly connected client
         for clients in self.connected_clients.as_ref().unwrap().iter() {
-            let _ = partial_client.send_message(
-                DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
-                    game_id: self.game_id.clone(),
-                    client_id: *clients.0,
-                })),
-                &self.redis_pool,
-            );
+            let _ = partial_client
+                .send_message(
+                    DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
+                        game_id: self.game_id.clone(),
+                        client_id: *clients.0,
+                    })),
+                    &self.redis_pool,
+                )
+                .await;
         }
 
         // Send the host to the newly connected client
-        let _ = partial_client.send_message(
-            DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
-                game_id: self.game_id.clone(),
-                client_id: self.partial_host.id,
-            })),
-            &self.redis_pool,
-        );
+        let _ = partial_client
+            .send_message(
+                DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
+                    game_id: self.game_id.clone(),
+                    client_id: self.partial_host.id,
+                })),
+                &self.redis_pool,
+            )
+            .await;
 
         // Send the new client to all connected clients
-        let _ = self.send_global(
-            DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
-                game_id: self.game_id.clone(),
-                client_id: partial_client.id,
-            })),
-            &self.redis_pool,
-        );
+        let _ = self
+            .send_global(
+                DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
+                    game_id: self.game_id.clone(),
+                    client_id: partial_client.id,
+                })),
+                &self.redis_pool,
+            )
+            .await;
 
         trace!(
             "Registering client {} in game {}",
             partial_client.id,
             self.game_id
         );
+
         self.connected_clients
             .as_mut()
             .unwrap()
@@ -227,7 +230,7 @@ impl Game {
     }
 
     /// Unregister a client from the game
-    pub fn unregister(&mut self, client_id: &Uuid) {
+    pub async fn unregister(&mut self, client_id: &Uuid) {
         trace!("Unregistering client from game");
         // Cancel if user is not game host
         if self.is_host
@@ -239,18 +242,20 @@ impl Game {
                 .is_some()
         {
             // Send the disconnected client event to all connected clients
-            let _ = self.send_global(
-                DefaultModel::new(GameEvent::new(DisconnectedClientGameEvent {
-                    game_id: self.game_id.clone(),
-                    client_id: *client_id,
-                })),
-                &self.redis_pool,
-            );
+            let _ = self
+                .send_global(
+                    DefaultModel::new(GameEvent::new(DisconnectedClientGameEvent {
+                        game_id: self.game_id.clone(),
+                        client_id: *client_id,
+                    })),
+                    &self.redis_pool,
+                )
+                .await;
         }
     }
 
     /// Send a message to all connected clients in the game
-    pub fn send_global<'a, T>(
+    pub async fn send_global<'a, T>(
         &self,
         message: DefaultModel<T>,
         redis_pool: &Pool<RedisConnectionManager>,
@@ -261,24 +266,29 @@ impl Game {
         trace!("Sending a global message to all clients in a game");
 
         // Send message to clients
-        for clients in self
+        for client in self
             .connected_clients
             .as_ref()
             .ok_or(ClientError::InternalServerError("not host"))?
             .iter()
         {
             // Todo: Better error handling when it fails to send message to client
-            let _ = clients.1.send_message(message.clone(), redis_pool);
+            if let Err(e) = client.1.send_message(message.clone(), redis_pool).await {
+                error!(
+                    "Failed to send global message to client with id {}, error {}",
+                    client.0, e
+                );
+            }
         }
 
         // Send message to host
-        self.partial_host.send_message(message, redis_pool)?;
+        self.partial_host.send_message(message, redis_pool).await?;
 
         Ok(())
     }
 
     /// Force shutdown the game
-    pub fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+    pub async fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         trace!("Trying to shutdown a game");
         if !self.is_host {
             return Err(Box::new(ClientError::NotGameHost(
@@ -292,16 +302,14 @@ impl Game {
         );
         for client in self.connected_clients.as_ref().unwrap().iter() {
             let partial = client.1;
-            let res = partial.send_message(
-                DefaultModel::new(GameEvent::new(ShutdownGameEvent {})),
-                &self.redis_pool,
-            );
-
-            match res {
-                Ok(_) => (),
-                Err(e) => {
-                    error!("Failed to send shutdown event to client{}", e);
-                }
+            if let Err(e) = partial
+                .send_message(
+                    DefaultModel::new(GameEvent::new(ShutdownGameEvent {})),
+                    &self.redis_pool,
+                )
+                .await
+            {
+                error!("Failed to send shutdown event to client{}", e);
             }
         }
 
@@ -313,13 +321,15 @@ impl Game {
         let _: () = conn.del(format!("GAME:{}", self.game_id))?;
 
         // Send final goodbye to the host
-        self.partial_host.send_message(
-            DefaultModel::new(Response::new(
-                Some(ShutdownResponse { success: true }),
-                models::ResponseOpCode::Shutdown,
-            )),
-            &self.redis_pool,
-        )?;
+        self.partial_host
+            .send_message(
+                DefaultModel::new(Response::new(
+                    Some(ShutdownResponse { success: true }),
+                    models::ResponseOpCode::Shutdown,
+                )),
+                &self.redis_pool,
+            )
+            .await?;
         Ok(())
     }
 }
@@ -329,7 +339,7 @@ impl Drop for Game {
         info!("Dropping a game object");
         if self.is_host {
             info!("Shutting down a game");
-            let _ = self.shutdown();
+            let _ = futures::executor::block_on(self.shutdown());
             let mut conn = self.redis_pool.get().unwrap();
             let _: () = conn.del(format!("GAME:{}", self.game_id)).unwrap();
         } else if self.partial_host.is_local {
@@ -338,40 +348,40 @@ impl Drop for Game {
                 .get_mut(&self.partial_host.id)
             {
                 if let Some(game) = &mut host_client.game {
-                    game.unregister(&self.partial_client.id);
+                    futures::executor::block_on(game.unregister(&self.partial_client.id));
                 }
             }
 
-            let _ = self.partial_client.send_message(
+            let _ = futures::executor::block_on(self.partial_client.send_message(
                 DefaultModel::new(Response::new(
                     Some(LeaveResponse { success: true }),
                     ResponseOpCode::Leave,
                 )),
                 &self.redis_pool,
-            );
+            ));
         } else {
-            info!("Leaving a game on another shard");
-            // If the client is not host, disconnect it from the game
-            let request = ShardRequest::new(
-                ShardLeaveRequest {
-                    game_id: self.game_id.to_string(),
-                    client_id: self.partial_client.id,
-                    host_id: self.partial_host.id,
-                    shard_id: Uuid::from_str(&self.partial_client.shard_id).unwrap(),
-                },
-                ShardRequestOpCode::Leave,
-            );
+            // info!("Leaving a game on another shard");
+            // // If the client is not host, disconnect it from the game
+            // let request = ShardRequest::new(
+            //     ShardLeaveRequest {
+            //         game_id: self.game_id.to_string(),
+            //         client_id: self.partial_client.id,
+            //         host_id: self.partial_host.id,
+            //         shard_id: Uuid::from_str(&self.partial_client.shard_id).unwrap(),
+            //     },
+            //     ShardRequestOpCode::Leave,
+            // );
 
-            // Send request to shard hosting the game
-            let _ = sharding::send_redis(
-                &self.redis_pool,
-                (
-                    None,
-                    Some(Uuid::from_str(&self.partial_host.shard_id).unwrap()),
-                ),
-                request,
-                ShardOpCode::Request,
-            );
+            // // Send request to shard hosting the game
+            // let _ = sharding::send_redis(
+            //     &self.redis_pool,
+            //     (
+            //         None,
+            //         Some(Uuid::from_str(&self.partial_host.shard_id).unwrap()),
+            //     ),
+            //     request,
+            //     ShardOpCode::Request,
+            // );
         }
     }
 }

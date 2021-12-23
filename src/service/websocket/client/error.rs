@@ -18,6 +18,8 @@ pub enum ClientError<'a> {
     GameNotStarted,
     InvalidGameID,
     InvalidOpCode,
+    ParsingError,
+    SendError,
 }
 
 impl<'a> OpCodeFetcher for ClientError<'a> {

@@ -2,7 +2,6 @@ use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 
 use crate::service::{
-    error::ServiceError,
     redis_pool::RedisConnectionManager,
     websocket::client::{
         error::ClientError,
@@ -73,26 +72,30 @@ impl ShardResponse {
                 let mut socket = match socket {
                     Some(socket) => socket,
                     None => {
-                        return Err(Box::new(ServiceError::CouldNotGetSocket));
+                        return Err(Box::new(ClientError::ClientDoesNotExist("Client does not exist")));
                     }
                 };
 
                 if socket.game.is_some() {
-                    socket.send_error(ClientError::AlreadyInGame("Client is already in a game"))?;
+                    socket
+                        .send_error(ClientError::AlreadyInGame("Client is already in a game"))
+                        .await.map_err(|_| ClientError::SendError)?;
                     return Err(Box::new(ClientError::AlreadyInGame(
                         "Client was for some stupid reason already in a game",
                     )));
                 }
 
                 if !response.success {
-                    socket.send_model(DefaultModel::new(Response::new(
-                        Some(JoinResponse {
-                            game_id: response.game_id,
-                            is_host: false,
-                            success: false,
-                        }),
-                        ResponseOpCode::Join,
-                    )))?;
+                    socket
+                        .send_model(DefaultModel::new(Response::new(
+                            Some(JoinResponse {
+                                game_id: response.game_id,
+                                is_host: false,
+                                success: false,
+                            }),
+                            ResponseOpCode::Join,
+                        )))
+                        .await.map_err(|_| ClientError::SendError)?;
                     return Ok(());
                 }
 
@@ -116,14 +119,16 @@ impl ShardResponse {
                     sockets.clone(),
                 ));
 
-                socket.send_model(DefaultModel::new(Response::new(
-                    Some(JoinResponse {
-                        game_id: response.game_id,
-                        is_host: false,
-                        success: true,
-                    }),
-                    ResponseOpCode::Join,
-                )))?;
+                socket
+                    .send_model(DefaultModel::new(Response::new(
+                        Some(JoinResponse {
+                            game_id: response.game_id,
+                            is_host: false,
+                            success: true,
+                        }),
+                        ResponseOpCode::Join,
+                    )))
+                    .await.map_err(|_| ClientError::SendError)?;
             }
             ShardResponseOpCode::Leave => {
                 let response = self.data::<ShardLeaveResponse>();
@@ -134,14 +139,16 @@ impl ShardResponse {
                 let socket = match socket {
                     Some(socket) => socket,
                     None => {
-                        return Err(Box::new(ServiceError::CouldNotGetSocket));
+                        return Err(Box::new(ClientError::ClientDoesNotExist("Client does not exist")));
                     }
                 };
 
-                socket.send_model(DefaultModel::new(Response::new(
-                    Some(LeaveResponse { success: true }),
-                    ResponseOpCode::Leave,
-                )))?;
+                socket
+                    .send_model(DefaultModel::new(Response::new(
+                        Some(LeaveResponse { success: true }),
+                        ResponseOpCode::Leave,
+                    )))
+                    .await.map_err(|_| ClientError::SendError)?;
             }
         };
 

@@ -19,14 +19,12 @@ struct Config {
     redis_addr: String,
 }
 
-#[cfg(debug_assertions)]
 #[derive(Deserialize, Debug)]
 struct DebugConfig {
     should_reset_redis: bool,
 }
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     std::env::set_var("RUST_LOG", "grass");
     env_logger::init();
 
@@ -41,7 +39,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     // Env debug config
-    #[cfg(debug_assertions)]
     if let Ok(config) = envy::from_env::<DebugConfig>() {
         if config.should_reset_redis {
             let client =
@@ -57,29 +54,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let shard_id = uuid::Uuid::new_v4().to_string();
     trace!("Generated shard id for initialization: {}", &shard_id);
 
-    // Initialize service
-    let host_addr = format!("{}:{}", cfg.address, cfg.port);
-    let mut service = Service::new(
-        &shard_id,
-        &host_addr,
-        Path::new("./tasks.toml"),
-        &cfg.redis_addr,
-    )
-    .await;
+    let rt = std::sync::Arc::new(tokio::runtime::Runtime::new().unwrap());
+    rt.clone().block_on(async move {
+        // Initialize service
+        let host_addr = format!("{}:{}", cfg.address, cfg.port);
+        let mut service = Service::new(
+            &shard_id,
+            &host_addr,
+            Path::new("./tasks.toml"),
+            &cfg.redis_addr,
+        )
+        .await;
 
-    fn x() {
-        fn y() {
-           fn z() {
-               fn n() {
-                   fn m() {
-                       
-                   }
-               }
-           }
-        }
-    }
+        // enter the tokio runtime
+        let _guard = rt.enter();
 
-    // Run until finished
-    let middleware = MiddlewareManager::new(middleware::shard_payload_interceptor);
-    service.run(middleware).await
+        // Run until finished
+        let middleware = MiddlewareManager::new(middleware::shard_payload_interceptor);
+        service.run(middleware).await
+    })
 }

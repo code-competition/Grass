@@ -5,8 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::service::{
-    error::ServiceError, redis_pool::RedisConnectionManager, sharding,
-    websocket::client::game::partial_client::PartialClient, Sockets,
+    redis_pool::RedisConnectionManager, sharding,
+    websocket::client::{game::partial_client::PartialClient, error::ClientError}, Sockets,
 };
 
 use self::{join::ShardJoinRequest, leave::ShardLeaveRequest};
@@ -64,42 +64,40 @@ impl ShardRequest {
 
                 // Register the client on the host
                 let mut s = sockets.write().await;
-                let game_host = s
-                    .get_mut(&request.host_id)
-                    .ok_or(ServiceError::CouldNotGetSocket)?;
-                let game = game_host
+                if s.get_mut(&request.host_id)
+                    .ok_or(ClientError::ClientDoesNotExist("Client does not exist"))?
                     .game
                     .as_mut()
-                    .ok_or(ServiceError::GameDoesNotExist)?;
-                match game.register(PartialClient::new(
-                    request.client_id,
-                    request.shard_id.to_string(),
-                    false,
-                    None,
-                )) {
-                    Ok(_) => (),
-                    Err(_) => {
-                        // Serialize response
-                        let response = ShardResponse::new(
-                            ShardJoinResponse {
-                                game_id: request.game_id,
-                                host_id: request.host_id,
-                                client_id: request.client_id,
-                                shard_id: Uuid::from_str(&shard_id).unwrap(),
-                                success: false,
-                            },
-                            ShardResponseOpCode::Join,
-                        );
+                    .ok_or(ClientError::NoGameWasFound)?
+                    .register(PartialClient::new(
+                        request.client_id,
+                        request.shard_id.to_string(),
+                        false,
+                        None,
+                    ))
+                    .await
+                    .is_err()
+                {
+                    // Serialize response
+                    let response = ShardResponse::new(
+                        ShardJoinResponse {
+                            game_id: request.game_id,
+                            host_id: request.host_id,
+                            client_id: request.client_id,
+                            shard_id: Uuid::from_str(&shard_id).unwrap(),
+                            success: false,
+                        },
+                        ShardResponseOpCode::Join,
+                    );
 
-                        // Send response to shard
-                        sharding::send_redis(
-                            &redis_pool,
-                            (Some(request.client_id), None),
-                            response,
-                            ShardOpCode::Response,
-                        )?;
-                        return Ok(());
-                    }
+                    // Send response to shard
+                    sharding::send_redis(
+                        &redis_pool,
+                        (Some(request.client_id), None),
+                        response,
+                        ShardOpCode::Response,
+                    )?;
+                    return Ok(());
                 }
 
                 // Serialize response
@@ -129,12 +127,12 @@ impl ShardRequest {
                 let mut s = sockets.write().await;
                 let game_host = s
                     .get_mut(&request.host_id)
-                    .ok_or(ServiceError::CouldNotGetSocket)?;
+                    .ok_or(ClientError::ClientDoesNotExist("Client does not exist"))?;
                 let game = game_host
                     .game
                     .as_mut()
-                    .ok_or(ServiceError::GameDoesNotExist)?;
-                game.unregister(&request.client_id);
+                    .ok_or(ClientError::ClientDoesNotExist("Client does not exist"))?;
+                game.unregister(&request.client_id).await;
 
                 // Serialize response
                 let response = ShardResponse::new(

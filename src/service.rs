@@ -1,4 +1,4 @@
-use std::{path::Path, sync::Arc, collections::HashMap};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use futures::{
     channel::oneshot::{Receiver, Sender},

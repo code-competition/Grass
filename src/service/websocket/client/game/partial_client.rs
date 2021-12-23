@@ -1,13 +1,12 @@
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
-use tokio::sync::mpsc::UnboundedSender;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
     sharding::{self, communication::ShardOpCode},
-    websocket::client::models::DefaultModel,
+    websocket::{client::models::DefaultModel, SocketSender},
 };
 
 #[derive(Debug, Clone)]
@@ -22,7 +21,7 @@ pub struct PartialClient {
     pub(crate) is_local: bool,
 
     /// Only available on local sockets, prevents deadlocking within games
-    pub(crate) write_channel: Option<UnboundedSender<Message>>,
+    pub(crate) write_channel: Option<SocketSender>,
 }
 
 impl PartialClient {
@@ -30,7 +29,7 @@ impl PartialClient {
         id: Uuid,
         shard_id: String,
         is_local: bool,
-        write_channel: Option<UnboundedSender<Message>>,
+        write_channel: Option<SocketSender>,
     ) -> PartialClient {
         PartialClient {
             id,
@@ -40,7 +39,7 @@ impl PartialClient {
         }
     }
 
-    pub fn send_message<'a, T>(
+    pub async fn send_message<'a, T>(
         &self,
         message: DefaultModel<T>,
         redis_pool: &Pool<RedisConnectionManager>,
@@ -52,7 +51,8 @@ impl PartialClient {
             self.write_channel
                 .as_ref()
                 .unwrap()
-                .send(Message::Text(serde_json::to_string(&message).unwrap()))?;
+                .send(Message::Text(serde_json::to_string(&message).unwrap()))
+                .await?;
         } else {
             sharding::send_redis(
                 redis_pool,

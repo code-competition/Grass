@@ -3,7 +3,6 @@ use std::{net::SocketAddr, sync::Arc};
 use r2d2::Pool;
 use redis::Commands;
 use serde_json::Value;
-use tokio::sync::mpsc::error::SendError;
 use tokio_tungstenite::tungstenite::Message;
 use uuid::Uuid;
 
@@ -52,11 +51,12 @@ impl SocketClient {
     /// Triggered once the client has been registered and is connected
     ///
     /// Sends a hello with the socket id
-    pub fn on_open(&mut self) {
+    pub async fn on_open(&mut self) {
         trace!("Client connected with address {}", self.addr);
 
         let model = DefaultModel::new(Hello { id: self.id });
         self.send_model(model)
+            .await
             .expect("could not send hello message");
     }
 
@@ -90,15 +90,16 @@ impl SocketClient {
     }
 
     /// Called when a client receives a new message
-    pub async fn on_message(
+    pub async fn on_message<'a>(
         client_id: Uuid,
         redis_pool: Pool<RedisConnectionManager>,
         available_tasks: Arc<Vec<GameTask>>,
         message: Message,
-        shard_id: &str,
+        shard_id: String,
         sockets: Sockets,
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> Result<bool, ClientError<'a>> {
         let mut should_close = false;
+        trace!("Parsing socket message");
         match message {
             Message::Text(text) => {
                 info!("Received text message: {}", text);
@@ -107,15 +108,16 @@ impl SocketClient {
                     serde_json::from_str(&text);
                 match model {
                     Ok(model) => {
+                        trace!("calling handle_message");
                         match tokio::time::timeout(
-                            std::time::Duration::from_millis(500),
+                            std::time::Duration::from_secs(5),
                             ClientMessageHandler::handle_message(
                                 client_id,
                                 &sockets,
                                 redis_pool,
                                 available_tasks,
                                 &model,
-                                shard_id,
+                                &shard_id,
                             ),
                         )
                         .await
@@ -128,10 +130,13 @@ impl SocketClient {
                             }
                             Err(e) => {
                                 let client = sockets.read().await.get(&client_id).unwrap().clone();
-                                client.send_model(DefaultModel::new(Response::new(
-                                    Some(TimeoutResponse::new(model)),
-                                    ResponseOpCode::Timeout,
-                                )))?;
+                                client
+                                    .send_model(DefaultModel::new(Response::new(
+                                        Some(TimeoutResponse::new(model)),
+                                        ResponseOpCode::Timeout,
+                                    )))
+                                    .await
+                                    .map_err(|_| ClientError::SendError)?;
                                 trace!("handle_message timed out, {}", e);
                             }
                         }
@@ -140,9 +145,16 @@ impl SocketClient {
                         error!("Client reached an error {:?}", e);
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
-                        sockets.read().await.get(&client_id).unwrap().send_error(
-                            ClientError::InvalidMessage("Invalid model, closing connection."),
-                        )?;
+                        sockets
+                            .read()
+                            .await
+                            .get(&client_id)
+                            .unwrap()
+                            .send_error(ClientError::InvalidMessage(
+                                "Invalid model, closing connection.",
+                            ))
+                            .await
+                            .map_err(|_| ClientError::SendError)?;
                     }
                 }
             }
@@ -151,14 +163,18 @@ impl SocketClient {
                 .await
                 .get(&client_id)
                 .unwrap()
-                .send(Message::Pong(bin))?,
+                .send(Message::Pong(bin))
+                .await
+                .map_err(|_| ClientError::SendError)?,
             Message::Pong(bin) => {
                 sockets
                     .read()
                     .await
                     .get(&client_id)
                     .unwrap()
-                    .send(Message::Ping(bin))?;
+                    .send(Message::Ping(bin))
+                    .await
+                    .map_err(|_| ClientError::SendError)?;
             }
             Message::Close(reason) => {
                 info!("Received close message: {:?}", reason);
@@ -172,23 +188,28 @@ impl SocketClient {
 
     /// Sends a error to the client
     #[inline]
-    pub fn send_error(&self, err: ClientError) -> Result<(), SendError<Message>> {
-        self.send_model(DefaultModel::new(err))
+    pub async fn send_error(&self, err: ClientError<'_>) -> Result<(), ClientError<'_>> {
+        error!("Sending error {} to client", err);
+        self.send_model(DefaultModel::new(err)).await
     }
 
     /// Sends a model (JSON serializable object) to the client
     #[inline]
-    pub fn send_model<'a, T>(&self, default: DefaultModel<T>) -> Result<(), SendError<Message>>
+    pub async fn send_model<'a, T>(&self, default: DefaultModel<T>) -> Result<(), ClientError<'_>>
     where
         T: serde::Serialize + serde::Deserialize<'a>,
     {
         self.send(Message::Text(serde_json::to_string(&default).unwrap()))
+            .await
     }
 
     /// Sends a raw websocket message
     #[inline]
-    pub fn send(&self, message: Message) -> Result<(), SendError<Message>> {
-        self.send_channel.send(message)
+    pub async fn send(&self, message: Message) -> Result<(), ClientError<'_>> {
+        self.send_channel
+            .send(message)
+            .await
+            .map_err(|_| ClientError::SendError)
     }
 
     /// Get a reference to the socket client's id.
