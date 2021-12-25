@@ -28,7 +28,7 @@ pub async fn shard_payload_interceptor(
             let model = payload.data::<DefaultModelSharding>();
             let model: DefaultModel<Value> =
                 serde_json::from_str(&model).expect("could not parse default model sharding");
-            if let Some(socket) = sockets.read().await.get(&client_id) {
+            if let Some(socket) = sockets.get(&client_id) {
                 let _ = socket.send_model(model).await;
             }
         }

@@ -67,8 +67,7 @@ impl ShardResponse {
                 let response = self.data::<ShardJoinResponse>();
 
                 // Register the game on the client
-                let mut s = sockets.write().await;
-                let socket = s.get_mut(&response.client_id);
+                let socket = sockets.get_mut(&response.client_id);
                 let mut socket = match socket {
                     Some(socket) => socket,
                     None => {
@@ -134,8 +133,7 @@ impl ShardResponse {
                 let response = self.data::<ShardLeaveResponse>();
                 println!("{:?}", (response));
 
-                let s = sockets.read().await;
-                let socket = s.get(&response.client_id);
+                let socket = sockets.get(&response.client_id);
                 let socket = match socket {
                     Some(socket) => socket,
                     None => {

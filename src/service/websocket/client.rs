@@ -129,7 +129,7 @@ impl SocketClient {
                                 }
                             }
                             Err(e) => {
-                                let client = sockets.read().await.get(&client_id).unwrap().clone();
+                                let client = sockets.get(&client_id).unwrap().clone();
                                 client
                                     .send_model(DefaultModel::new(Response::new(
                                         Some(TimeoutResponse::new(model)),
@@ -146,8 +146,6 @@ impl SocketClient {
                         error!("Receieved invalid model from socket, closing connection.");
                         should_close = true;
                         sockets
-                            .read()
-                            .await
                             .get(&client_id)
                             .unwrap()
                             .send_error(ClientError::InvalidMessage(
@@ -159,8 +157,6 @@ impl SocketClient {
                 }
             }
             Message::Ping(bin) => sockets
-                .read()
-                .await
                 .get(&client_id)
                 .unwrap()
                 .send(Message::Pong(bin))
@@ -168,8 +164,6 @@ impl SocketClient {
                 .map_err(|_| ClientError::SendError)?,
             Message::Pong(bin) => {
                 sockets
-                    .read()
-                    .await
                     .get(&client_id)
                     .unwrap()
                     .send(Message::Ping(bin))

@@ -63,8 +63,7 @@ impl ShardRequest {
                 let request = self.data::<ShardJoinRequest>();
 
                 // Register the client on the host
-                let mut s = sockets.write().await;
-                if s.get_mut(&request.host_id)
+                if sockets.get_mut(&request.host_id)
                     .ok_or(ClientError::ClientDoesNotExist("Client does not exist"))?
                     .game
                     .as_mut()
@@ -124,8 +123,7 @@ impl ShardRequest {
                 let request = self.data::<ShardLeaveRequest>();
 
                 // Register the client on the host
-                let mut s = sockets.write().await;
-                let game_host = s
+                let mut game_host = sockets
                     .get_mut(&request.host_id)
                     .ok_or(ClientError::ClientDoesNotExist("Client does not exist"))?;
                 let game = game_host

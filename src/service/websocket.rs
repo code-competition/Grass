@@ -41,7 +41,7 @@ pub async fn accept_connection(
 
     // Register socket client
     let client = SocketClient::new(addr, sender.clone());
-    sockets.write().await.insert(*client.id(), client.clone());
+    sockets.insert(*client.id(), client.clone());
 
     // Prepare reader task
     // This task reads all incoming messages from the **CLIENT** coming through the TcpListener
@@ -119,8 +119,6 @@ pub async fn accept_connection(
 
     // Trigger on open event for socket client
     sockets
-        .write()
-        .await
         .get_mut(client.id())
         .expect("socket connection does not exist")
         .on_open()
@@ -128,8 +126,6 @@ pub async fn accept_connection(
 
     // Registers the socket in the global datastore of sockets
     let res = sockets
-        .read()
-        .await
         .get(client.id())
         .expect("socket connection does not exist")
         .register(&redis_pool, shard_id);
@@ -140,7 +136,7 @@ pub async fn accept_connection(
                 "An error occured while registering user on the global socket datastore: {}",
                 e
             );
-            sockets.write().await.remove(client.id());
+            sockets.remove(client.id());
         }
     }
 
@@ -150,16 +146,12 @@ pub async fn accept_connection(
 
     // Trigger on close event
     sockets
-        .write()
-        .await
         .get_mut(client.id())
         .expect("socket connection does not exist")
         .on_close();
 
     // Unregisters the socket in the global datastore of sockets
     let res = sockets
-        .read()
-        .await
         .get(client.id())
         .expect("socket connection does not exist")
         .unregister(&redis_pool);
@@ -175,6 +167,6 @@ pub async fn accept_connection(
     }
 
     // Remove the socket locally
-    sockets.write().await.remove(client.id());
+    sockets.remove(client.id());
     info!("Socket disconnected: {}", addr);
 }

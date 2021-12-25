@@ -115,7 +115,9 @@ impl Game {
 
         // Verify that the tasks have been filled up
         if self.tasks.len() != task_count {
-            return Err(Box::new(ClientError::InternalServerError("Internal server error, requested task count could not be filled")));
+            return Err(Box::new(ClientError::InternalServerError(
+                "Internal server error, requested task count could not be filled",
+            )));
         }
 
         // Get the first task to send to all clients
@@ -138,6 +140,8 @@ impl Game {
                 &self.redis_pool,
             )
             .await;
+
+        self.is_started = true;
 
         Ok(())
     }
@@ -344,9 +348,7 @@ impl Drop for Game {
             let _: () = conn.del(format!("GAME:{}", self.game_id)).unwrap();
         } else if self.partial_host.is_local {
             info!("Leaving game, the host is local");
-            if let Some(host_client) = &mut futures::executor::block_on(self.sockets.write())
-                .get_mut(&self.partial_host.id)
-            {
+            if let Some(host_client) = &mut self.sockets.get_mut(&self.partial_host.id) {
                 if let Some(game) = &mut host_client.game {
                     futures::executor::block_on(game.unregister(&self.partial_client.id));
                 }

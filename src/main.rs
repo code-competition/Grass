@@ -56,6 +56,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let rt = std::sync::Arc::new(tokio::runtime::Runtime::new().unwrap());
     rt.clone().block_on(async move {
+        console_subscriber::init();
+
         // Initialize service
         let host_addr = format!("{}:{}", cfg.address, cfg.port);
         let mut service = Service::new(
