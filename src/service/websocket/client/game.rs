@@ -106,6 +106,7 @@ impl Game {
         task_count: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
         self.public = false;
+        self.is_started = true;
 
         // Choose a random programming question
         self.tasks = available_tasks
@@ -141,8 +142,6 @@ impl Game {
             )
             .await;
 
-        self.is_started = true;
-
         Ok(())
     }
 
@@ -169,7 +168,7 @@ impl Game {
 
     /// Fetches a task at index
     pub fn get_task_indexed(&self, index: usize) -> Result<&GameTask, Option<()>> {
-        if !self.is_started {
+        if self.is_started {
             Ok(self.tasks.get(index).ok_or(Some(()))?)
         } else {
             Err(None)
