@@ -395,7 +395,7 @@ impl Request {
                             if !game.is_started {
                                 (None, Some(ClientError::GameNotStarted))
                             } else {
-                                let result = game.compile_code(&client_id, request.code).await;
+                                let result = game.test_code(&client_id, request.code, request.task_index).await;
                                 println!("{:?}", (result));
                                 (None, None)
                             }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use r2d2::Pool;
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::tungstenite::Message;
@@ -8,6 +10,8 @@ use crate::service::{
     sharding::{self, communication::ShardOpCode},
     websocket::{client::models::DefaultModel, SocketSender},
 };
+
+use super::task::progress::TaskProgress;
 
 #[derive(Debug, Clone)]
 pub struct PartialClient {
@@ -22,6 +26,9 @@ pub struct PartialClient {
 
     /// Only available on local sockets, prevents deadlocking within games
     pub(crate) write_channel: Option<SocketSender>,
+
+    /// Only available if the client is a client in a game
+    pub(crate) task_progress: Option<HashMap<usize, TaskProgress>>,
 }
 
 impl PartialClient {
@@ -36,6 +43,7 @@ impl PartialClient {
             shard_id,
             is_local,
             write_channel,
+            task_progress: None,
         }
     }
 
@@ -63,5 +71,10 @@ impl PartialClient {
         }
 
         Ok(())
+    }
+
+    #[allow(dead_code)]
+    pub fn shard_id(&self) -> &str {
+        self.shard_id.as_ref()
     }
 }

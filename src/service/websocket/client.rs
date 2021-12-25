@@ -17,7 +17,7 @@ use crate::service::{
 use self::{
     error::ClientError,
     game::{task::GameTask, Game},
-    models::{hello::Hello, DefaultModel},
+    models::{forced_disconnection::ForcedDisconnection, hello::Hello, DefaultModel},
 };
 use message_handler::ClientMessageHandler;
 
@@ -34,8 +34,11 @@ pub struct SocketClient {
     addr: SocketAddr,
     pub(crate) send_channel: SocketSender,
 
-    // Some(...) if user is in a game
+    /// Some(...) if user is in a game
     pub(crate) game: Option<Game>,
+
+    /// True if the shutdown was done through event on_close
+    performed_safe_shutdown: bool,
 }
 
 impl SocketClient {
@@ -45,6 +48,7 @@ impl SocketClient {
             addr,
             send_channel,
             game: None,
+            performed_safe_shutdown: false,
         }
     }
 
@@ -62,6 +66,7 @@ impl SocketClient {
 
     /// Triggered when connection is closing
     pub fn on_close(&mut self) {
+        self.performed_safe_shutdown = true;
         if let Some(game) = self.game.take() {
             drop(game);
         }
@@ -210,5 +215,16 @@ impl SocketClient {
     #[inline]
     pub fn id(&self) -> &Uuid {
         &self.id
+    }
+}
+
+impl Drop for SocketClient {
+    fn drop(&mut self) {
+        // If the client wasn't safely closed, send shutdown event to client
+        if !self.performed_safe_shutdown {
+            let _ = futures::executor::block_on(
+                self.send_model(DefaultModel::new(ForcedDisconnection {})),
+            );
+        }
     }
 }

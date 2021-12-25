@@ -25,8 +25,8 @@ use self::{
         task::TaskGameEvent,
     },
     partial_client::PartialClient,
-    sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest},
-    task::GameTask,
+    sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest, SandboxResponse},
+    task::{progress::TaskProgress, GameTask},
 };
 
 use super::error::ClientError;
@@ -38,6 +38,15 @@ pub mod task;
 
 pub mod sandbox {
     tonic::include_proto!("sandbox");
+}
+
+#[derive(Debug, Clone)]
+pub struct CompilationResult {
+    task_index: usize,
+    task_progress: Vec<(usize, bool)>,
+    is_done: bool,
+    stdout: String,
+    stderr: String,
 }
 
 #[derive(Debug, Clone)]
@@ -105,6 +114,11 @@ impl Game {
         available_tasks: Arc<Vec<GameTask>>,
         task_count: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        self.is_host()?;
+        if self.is_started {
+            return Err(Box::new(ClientError::GameAlreadyStarted));
+        }
+
         self.public = false;
         self.is_started = true;
 
@@ -119,6 +133,31 @@ impl Game {
             return Err(Box::new(ClientError::InternalServerError(
                 "Internal server error, requested task count could not be filled",
             )));
+        }
+
+        // Add tasks to all connected clients
+        for client in self.connected_clients.as_mut().unwrap().values_mut() {
+            for task in self.tasks.iter().enumerate() {
+                client.task_progress.as_mut().unwrap().insert(
+                    task.0,
+                    TaskProgress {
+                        finished_first: false,
+                        finished_all: false,
+                    },
+                );
+            }
+        }
+
+        // Add taks to host
+        self.partial_host.task_progress = Some(HashMap::new());
+        for task in self.tasks.iter().enumerate() {
+            self.partial_host.task_progress.as_mut().unwrap().insert(
+                task.0,
+                TaskProgress {
+                    finished_first: false,
+                    finished_all: false,
+                },
+            );
         }
 
         // Get the first task to send to all clients
@@ -146,24 +185,115 @@ impl Game {
     }
 
     /// Compile client code and return result
-    pub async fn compile_code(
+    pub async fn test_code(
         &mut self,
         client_id: &Uuid,
         code: String,
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051").await?;
+        task_index: usize,
+    ) -> Result<CompilationResult, Box<dyn std::error::Error>> {
+        self.is_host()?;
+        let task = self
+            .get_task_indexed(task_index)
+            .map_err(|_| ClientError::OutOfRangeTask)?
+            .to_owned();
 
+        let connected_client = if !self.is_host {
+            self.connected_clients
+                .as_mut()
+                .unwrap()
+                .get_mut(client_id)
+                .ok_or(ClientError::ClientDoesNotExist(
+                    "Client does not exist in the game",
+                ))?
+        } else {
+            &mut self.partial_host
+        };
+
+        let task_progress = connected_client
+            .task_progress
+            .as_mut()
+            .unwrap()
+            .get_mut(&task_index)
+            .unwrap();
+
+        if !task_progress.finished_first {
+            // Run first test
+            let test_case = task.test_cases.get(0).unwrap();
+            let result = Self::compile_code(client_id, code, test_case.stdin.to_string())
+                .await
+                .map_err(|_| ClientError::InternalServerError("failed to compile"))?;
+
+            // It failed, return stderr
+            if !result.success {
+                let stderr = result.stderr.join("");
+                return Ok(CompilationResult {
+                    task_index,
+                    task_progress: vec![],
+                    is_done: false,
+                    stdout: String::new(),
+                    stderr,
+                });
+            } else {
+                let mut stdout = result.stdout.join("");
+                // Clean output
+                if stdout.ends_with('\n') {
+                    stdout.pop();
+                }
+                if stdout.ends_with('\r') {
+                    stdout.pop();
+                }
+
+                if stdout == test_case.expected {
+                    task_progress.finished_first = true;
+                    return Ok(CompilationResult {
+                        task_index,
+                        task_progress: vec![(0, true)],
+                        is_done: false,
+                        stdout,
+                        stderr: String::new(),
+                    });
+                } else {
+                    task_progress.finished_first = false;
+                    return Ok(CompilationResult {
+                        task_index,
+                        task_progress: vec![(0, false)],
+                        is_done: false,
+                        stdout,
+                        stderr: String::new(),
+                    });
+                }
+            }
+        } else {
+            // Run all tests
+            for tests in task.test_cases.into_iter() {
+                // break if any of them fail
+            }
+        }
+
+        Ok(CompilationResult {
+            task_index,
+            task_progress: todo!(),
+            is_done: todo!(),
+            stdout: todo!(),
+            stderr: todo!(),
+        })
+    }
+
+    /// Compile client code and return result
+    async fn compile_code(
+        client_id: &Uuid,
+        code: String,
+        stdin: String,
+    ) -> Result<SandboxResponse, Box<dyn std::error::Error>> {
+        let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051").await?;
         let request = tonic::Request::new(SandboxRequest {
             user_id: client_id.to_string(),
             code,
+            stdin,
             language: sandbox::Language::Rust as i32,
         });
 
-        let response = client.compile(request).await?;
-
-        println!("{:?}", (response));
-
-        Ok(())
+        Ok(client.compile(request).await?.into_inner())
     }
 
     /// Fetches a task at index
@@ -266,6 +396,7 @@ impl Game {
     where
         T: Serialize + Deserialize<'a> + Clone,
     {
+        self.is_host()?;
         trace!("Sending a global message to all clients in a game");
 
         // Send message to clients
@@ -292,12 +423,7 @@ impl Game {
 
     /// Force shutdown the game
     pub async fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        trace!("Trying to shutdown a game");
-        if !self.is_host {
-            return Err(Box::new(ClientError::NotGameHost(
-                "Client is not game host",
-            )));
-        }
+        self.is_host()?;
 
         trace!(
             "Host \"{}\" triggered a shutdown event",
@@ -334,6 +460,16 @@ impl Game {
             )
             .await?;
         Ok(())
+    }
+
+    fn is_host(&self) -> Result<(), Box<dyn std::error::Error>> {
+        if !self.is_host {
+            Err(Box::new(ClientError::NotGameHost(
+                "Client is not the game host",
+            )))
+        } else {
+            Ok(())
+        }
     }
 }
 

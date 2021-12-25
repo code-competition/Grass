@@ -16,6 +16,7 @@ pub enum ClientError<'a> {
     OutOfRangeTask,
     NoGameWasFound,
     GameNotStarted,
+    GameAlreadyStarted,
     InvalidGameID,
     InvalidOpCode,
     ParsingError,

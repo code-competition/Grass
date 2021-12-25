@@ -2,14 +2,17 @@
 task_id = "248fa5e0-a3ac-4de0-a077-307c80d12126"
 question = "What's 9 + 10?"
     [[tasks.test_cases]]
-    expected = "21"
+    stdin = "9,10"
+    expected = "19"
 [[tasks]]
 task_id = "238fa5e0-a3ac-4de0-a077-307c80d12126"
 question = "What's 10 + 10?"
     [[tasks.test_cases]]
+    stdin = "10,10"
     expected = "20"
 [[tasks]]
 task_id = "268fa5e0-a3ac-4de0-a077-307c80d12126"
 question = "What's 11 + 10?"
     [[tasks.test_cases]]
+    stdin = "11,10"
     expected = "21"
