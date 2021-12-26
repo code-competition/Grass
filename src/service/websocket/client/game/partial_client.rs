@@ -11,8 +11,6 @@ use crate::service::{
     websocket::{client::models::DefaultModel, SocketSender},
 };
 
-use super::task::progress::TaskProgress;
-
 #[derive(Debug, Clone)]
 pub struct PartialClient {
     pub(crate) id: Uuid,
@@ -28,7 +26,7 @@ pub struct PartialClient {
     pub(crate) write_channel: Option<SocketSender>,
 
     /// Only available if the client is a client in a game
-    pub(crate) task_progress: Option<HashMap<usize, TaskProgress>>,
+    pub(crate) task_progress: Option<HashMap<usize, bool>>,
 }
 
 impl PartialClient {

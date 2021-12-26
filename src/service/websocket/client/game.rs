@@ -20,13 +20,16 @@ use crate::service::{
 };
 
 use self::{
-    models::event::{
-        disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent,
-        task::TaskGameEvent,
+    models::{
+        event::{
+            disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent,
+            task::TaskGameEvent,
+        },
+        response::compile::CompilationResponse,
     },
     partial_client::PartialClient,
     sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest, SandboxResponse},
-    task::{progress::TaskProgress, GameTask},
+    task::GameTask,
 };
 
 use super::error::ClientError;
@@ -38,15 +41,6 @@ pub mod task;
 
 pub mod sandbox {
     tonic::include_proto!("sandbox");
-}
-
-#[derive(Debug, Clone)]
-pub struct CompilationResult {
-    task_index: usize,
-    task_progress: Vec<(usize, bool)>,
-    is_done: bool,
-    stdout: String,
-    stderr: String,
 }
 
 #[derive(Debug, Clone)]
@@ -137,27 +131,20 @@ impl Game {
 
         // Add tasks to all connected clients
         for client in self.connected_clients.as_mut().unwrap().values_mut() {
+            client.task_progress = Some(HashMap::new());
             for task in self.tasks.iter().enumerate() {
-                client.task_progress.as_mut().unwrap().insert(
-                    task.0,
-                    TaskProgress {
-                        finished_first: false,
-                        finished_all: false,
-                    },
-                );
+                client.task_progress.as_mut().unwrap().insert(task.0, false);
             }
         }
 
         // Add taks to host
         self.partial_host.task_progress = Some(HashMap::new());
         for task in self.tasks.iter().enumerate() {
-            self.partial_host.task_progress.as_mut().unwrap().insert(
-                task.0,
-                TaskProgress {
-                    finished_first: false,
-                    finished_all: false,
-                },
-            );
+            self.partial_host
+                .task_progress
+                .as_mut()
+                .unwrap()
+                .insert(task.0, false);
         }
 
         // Get the first task to send to all clients
@@ -190,7 +177,7 @@ impl Game {
         client_id: &Uuid,
         code: String,
         task_index: usize,
-    ) -> Result<CompilationResult, Box<dyn std::error::Error>> {
+    ) -> Result<CompilationResponse, Box<dyn std::error::Error>> {
         self.is_host()?;
         let task = self
             .get_task_indexed(task_index)
@@ -209,73 +196,140 @@ impl Game {
             &mut self.partial_host
         };
 
-        let task_progress = connected_client
-            .task_progress
-            .as_mut()
-            .unwrap()
-            .get_mut(&task_index)
-            .unwrap();
+        // Run all public tests, if they all succeed, run the private ones too
+        let gathered_stdin = task
+            .public_test_cases
+            .iter()
+            .map(|test| test.stdin.to_owned())
+            .collect::<Vec<String>>();
+        let result = Self::compile_code(client_id, code.clone(), gathered_stdin).await?;
 
-        if !task_progress.finished_first {
-            // Run first test
-            let test_case = task.test_cases.get(0).unwrap();
-            let result = Self::compile_code(client_id, code, test_case.stdin.to_string())
-                .await
-                .map_err(|_| ClientError::InternalServerError("failed to compile"))?;
+        if !result.success {
+            return Ok(CompilationResponse {
+                task_index,
+                task_test_progress: vec![],
+                is_done: false,
+                is_done_with_public_tests: false,
+                is_done_with_private_tests: false,
+                stderr: result.stderr.join(""),
+            });
+        }
 
-            // It failed, return stderr
-            if !result.success {
-                let stderr = result.stderr.join("");
-                return Ok(CompilationResult {
-                    task_index,
-                    task_progress: vec![],
-                    is_done: false,
-                    stdout: String::new(),
-                    stderr,
-                });
-            } else {
-                let mut stdout = result.stdout.join("");
-                // Clean output
-                if stdout.ends_with('\n') {
-                    stdout.pop();
-                }
-                if stdout.ends_with('\r') {
-                    stdout.pop();
-                }
-
-                if stdout == test_case.expected {
-                    task_progress.finished_first = true;
-                    return Ok(CompilationResult {
-                        task_index,
-                        task_progress: vec![(0, true)],
-                        is_done: false,
-                        stdout,
-                        stderr: String::new(),
-                    });
-                } else {
-                    task_progress.finished_first = false;
-                    return Ok(CompilationResult {
-                        task_index,
-                        task_progress: vec![(0, false)],
-                        is_done: false,
-                        stdout,
-                        stderr: String::new(),
-                    });
-                }
+        // Verify output against public tests
+        let mut public_finished_tests = Vec::new();
+        for (i, mut s) in result.stdout.into_iter().enumerate() {
+            if s.ends_with('\n') {
+                s.pop();
             }
-        } else {
-            // Run all tests
-            for tests in task.test_cases.into_iter() {
-                // break if any of them fail
+
+            if s == task
+                .public_test_cases
+                .get(i)
+                .ok_or(ClientError::InternalServerError(
+                    "task response length mismatch",
+                ))?
+                .expected
+            {
+                public_finished_tests.push(task.public_test_cases.get(i).ok_or(
+                    ClientError::InternalServerError("task response length mismatch"),
+                )?);
             }
         }
 
-        Ok(CompilationResult {
+        // Check if all public tests succeeded
+        if public_finished_tests.len() != task.public_test_cases.len() {
+            let mut finished_public_tests = Vec::new();
+            public_finished_tests
+                .iter()
+                .enumerate()
+                .for_each(|(x, _)| finished_public_tests.push((x, false)));
+            for (index, _) in public_finished_tests.iter().enumerate() {
+                *finished_public_tests.get_mut(index).unwrap() = (index, true);
+            }
+
+            return Ok(CompilationResponse {
+                task_index,
+                task_test_progress: finished_public_tests,
+                is_done: false,
+                is_done_with_public_tests: false,
+                is_done_with_private_tests: false,
+                stderr: result.stderr.first().unwrap_or(&String::new()).to_string(),
+            });
+        }
+
+        let mut finished_public_tests = Vec::new();
+        public_finished_tests
+            .iter()
+            .enumerate()
+            .for_each(|(x, _)| finished_public_tests.push((x, true)));
+
+        // If the public tests succeeded, test against the private test cases
+        // Run all public tests, if they all succeed, run the private ones too
+        let gathered_stdin = task
+            .private_test_cases
+            .iter()
+            .map(|test| test.stdin.to_owned())
+            .collect::<Vec<String>>();
+        let result = Self::compile_code(client_id, code, gathered_stdin).await?;
+
+        if !result.success {
+            return Ok(CompilationResponse {
+                task_index,
+                task_test_progress: finished_public_tests,
+                is_done: false,
+                is_done_with_public_tests: true,
+                is_done_with_private_tests: false,
+                stderr: result.stderr.join(""),
+            });
+        }
+
+        // Verify output against public tests
+        let mut private_finished_tests = Vec::new();
+        for (i, mut s) in result.stdout.into_iter().enumerate() {
+            if s.ends_with('\n') {
+                s.pop();
+            }
+
+            if s == task
+                .private_test_cases
+                .get(i)
+                .ok_or(ClientError::InternalServerError(
+                    "task response length mismatch",
+                ))?
+                .expected
+            {
+                private_finished_tests.push(task.private_test_cases.get(i).ok_or(
+                    ClientError::InternalServerError("task response length mismatch"),
+                )?);
+            }
+        }
+
+        // Check if all public tests succeeded
+        if private_finished_tests.len() != task.private_test_cases.len() {
+            return Ok(CompilationResponse {
+                task_index,
+                task_test_progress: finished_public_tests,
+                is_done: false,
+                is_done_with_public_tests: true,
+                is_done_with_private_tests: false,
+                stderr: result.stderr.first().unwrap_or(&String::new()).to_string(),
+            });
+        }
+
+        // Set the task as finished
+        connected_client
+            .task_progress
+            .as_mut()
+            .unwrap()
+            .insert(task_index, true);
+
+        Ok(CompilationResponse {
             task_index,
-            task_progress: todo!(),
-            is_done: todo!(),
-            stdout: todo!(),
-            stderr: todo!(),
+            task_test_progress: finished_public_tests,
+            is_done: true,
+            is_done_with_public_tests: true,
+            is_done_with_private_tests: true,
+            stderr: String::new(),
         })
     }
 
@@ -283,7 +337,7 @@ impl Game {
     async fn compile_code(
         client_id: &Uuid,
         code: String,
-        stdin: String,
+        stdin: Vec<String>,
     ) -> Result<SandboxResponse, Box<dyn std::error::Error>> {
         let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051").await?;
         let request = tonic::Request::new(SandboxRequest {
@@ -293,7 +347,7 @@ impl Game {
             language: sandbox::Language::Rust as i32,
         });
 
-        Ok(client.compile(request).await?.into_inner())
+        Ok((client.compile(request).await)?.into_inner())
     }
 
     /// Fetches a task at index
@@ -307,7 +361,6 @@ impl Game {
 
     /// Register a new client with the game
     pub async fn register(&mut self, partial_client: PartialClient) -> Result<(), ()> {
-        trace!("Registering client from game");
         // Cancel if user is not game host
         if !self.is_host || !self.public {
             return Err(());
@@ -364,7 +417,6 @@ impl Game {
 
     /// Unregister a client from the game
     pub async fn unregister(&mut self, client_id: &Uuid) {
-        trace!("Unregistering client from game");
         // Cancel if user is not game host
         if self.is_host
             && self
@@ -496,29 +548,6 @@ impl Drop for Game {
                 )),
                 &self.redis_pool,
             ));
-        } else {
-            // info!("Leaving a game on another shard");
-            // // If the client is not host, disconnect it from the game
-            // let request = ShardRequest::new(
-            //     ShardLeaveRequest {
-            //         game_id: self.game_id.to_string(),
-            //         client_id: self.partial_client.id,
-            //         host_id: self.partial_host.id,
-            //         shard_id: Uuid::from_str(&self.partial_client.shard_id).unwrap(),
-            //     },
-            //     ShardRequestOpCode::Leave,
-            // );
-
-            // // Send request to shard hosting the game
-            // let _ = sharding::send_redis(
-            //     &self.redis_pool,
-            //     (
-            //         None,
-            //         Some(Uuid::from_str(&self.partial_host.shard_id).unwrap()),
-            //     ),
-            //     request,
-            //     ShardOpCode::Request,
-            // );
         }
     }
 }

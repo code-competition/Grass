@@ -104,18 +104,15 @@ impl SocketClient {
         sockets: Sockets,
     ) -> Result<bool, ClientError<'a>> {
         let mut should_close = false;
-        trace!("Parsing socket message");
         match message {
             Message::Text(text) => {
-                info!("Received text message: {}", text);
                 // Try to parse the message according to the Default JSON layout
                 let model: Result<DefaultModel<Value>, serde_json::Error> =
                     serde_json::from_str(&text);
                 match model {
                     Ok(model) => {
-                        trace!("calling handle_message");
                         match tokio::time::timeout(
-                            std::time::Duration::from_secs(5),
+                            std::time::Duration::from_secs(50),
                             ClientMessageHandler::handle_message(
                                 client_id,
                                 &sockets,
@@ -133,7 +130,7 @@ impl SocketClient {
                                     should_close = true;
                                 }
                             }
-                            Err(e) => {
+                            Err(_) => {
                                 let client = sockets.get(&client_id).unwrap().clone();
                                 client
                                     .send_model(DefaultModel::new(Response::new(
@@ -142,7 +139,7 @@ impl SocketClient {
                                     )))
                                     .await
                                     .map_err(|_| ClientError::SendError)?;
-                                trace!("handle_message timed out, {}", e);
+                                trace!("Message handling timed out, disconnecting client.");
                             }
                         }
                     }

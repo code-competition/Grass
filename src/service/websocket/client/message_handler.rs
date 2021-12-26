@@ -34,11 +34,6 @@ impl ClientMessageHandler {
             ));
         };
 
-        trace!(
-            "Receieved message from client, parsing it OpCode: {:?}",
-            &model.op
-        );
-
         match model.op {
             OpCode::Request => {
                 let request: Request =

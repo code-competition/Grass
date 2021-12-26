@@ -8,6 +8,7 @@ pub mod shutdown;
 pub mod task;
 pub mod timeout;
 pub mod ping;
+pub mod compile;
 
 // Models for responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,6 +31,7 @@ pub enum ResponseOpCode {
     Task,
     Timeout,
     Ping,
+    Compile,
 }
 
 impl<T> OpCodeFetcher for Response<T> {

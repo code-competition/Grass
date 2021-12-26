@@ -1,8 +1,8 @@
 use std::fmt;
 
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
-use super::models::{OpCodeFetcher, OpCode};
+use super::models::{OpCode, OpCodeFetcher};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ClientError<'a> {
@@ -13,6 +13,7 @@ pub enum ClientError<'a> {
     InternalServerError(&'a str),
     NotGameHost(&'a str),
     NoDataWithOpCode(&'a str),
+    CompilationError(&'a str),
     OutOfRangeTask,
     NoGameWasFound,
     GameNotStarted,

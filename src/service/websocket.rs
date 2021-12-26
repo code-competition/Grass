@@ -24,7 +24,6 @@ pub async fn accept_connection(
     let addr = stream
         .peer_addr()
         .expect("connected streams should have a peer address");
-    trace!("Peer address: {}", addr);
 
     // Accept async websocket connection
     let ws_stream = tokio_tungstenite::accept_async(stream)
@@ -60,7 +59,6 @@ pub async fn accept_connection(
                 Some(s) => match s.1 {
                     Ok(message) => {
                         // Trigger on_message(...) event
-                        info!("Triggering on_message event for client");
                         match SocketClient::on_message(
                             local_client_id,
                             local_redis_pool.clone(),
@@ -96,11 +94,10 @@ pub async fn accept_connection(
     // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
     let write_channel = tokio::spawn(async move {
         loop {
-            trace!("Ready to receive message from internal write channel");
             match receiver.recv().await {
                 Some(message) => match write.send(message).await {
                     Ok(_) => {
-                        trace!("Sent to websocket");
+                        trace!("Sent message to websocket");
                     }
                     Err(e) => {
                         error!(

@@ -19,7 +19,9 @@ use crate::service::{
 use self::{compile::CompileRequest, join::JoinRequest, start::StartRequest, task::TaskRequest};
 
 use super::{
-    response::{join::JoinResponse, ping::PingResponse, task::TaskResponse},
+    response::{
+        compile::CompilationResponse, join::JoinResponse, ping::PingResponse, task::TaskResponse,
+    },
     Response, ResponseOpCode,
 };
 
@@ -241,28 +243,7 @@ impl Request {
                             .send_model(response.unwrap())
                             .await
                             .map_err(|_| ClientError::SendError)?;
-                    } // else {
-                      //         info!("Game is on another shard, need to register there");
-
-                    //         // Serialize request
-                    //         let request = ShardRequest::new(
-                    //             ShardJoinRequest {
-                    //                 game_id: join_game.game_id,
-                    //                 client_id: client.id,
-                    //                 host_id: redis_game.host_id,
-                    //                 shard_id: Uuid::from_str(shard_id)?,
-                    //             },
-                    //             ShardRequestOpCode::Join,
-                    //         );
-
-                    //         // Send join request to shard
-                    //         sharding::send_redis(
-                    //             &redis_pool,
-                    //             (None, Some(Uuid::from_str(&redis_game.shard_id)?)),
-                    //             request,
-                    //             ShardOpCode::Request,
-                    //         )?;
-                    //     }
+                    }
                 }
             }
             RequestOpCode::Leave => {
@@ -372,6 +353,7 @@ impl Request {
                 }
             }
             RequestOpCode::Compile => {
+                trace!("Received compilation request");
                 // Check if client is in game and if so, return game host id
                 let host_id = {
                     let client = sockets.get(&client_id).unwrap();
@@ -389,15 +371,22 @@ impl Request {
                 let request: CompileRequest = serde_json::from_value(self.d.unwrap())
                     .map_err(|_| ClientError::ParsingError)?;
 
-                let response: (Option<()>, Option<ClientError>) = {
+                let response: (Option<CompilationResponse>, Option<ClientError>) = {
                     if let Some(host) = &mut sockets.get_mut(&host_id) {
                         if let Some(game) = &mut host.game {
                             if !game.is_started {
                                 (None, Some(ClientError::GameNotStarted))
                             } else {
-                                let result = game.test_code(&client_id, request.code, request.task_index).await;
-                                println!("{:?}", (result));
-                                (None, None)
+                                match game
+                                    .test_code(&client_id, request.code, request.task_index)
+                                    .await
+                                {
+                                    Ok(r) => (Some(r), None),
+                                    Err(_) => (
+                                        None,
+                                        Some(ClientError::CompilationError("failed to compile")),
+                                    ),
+                                }
                             }
                         } else {
                             (
@@ -418,7 +407,15 @@ impl Request {
                     let _ = client.send_error(error.clone()).await;
                     return Err(error);
                 } else if let Some(response) = response.0 {
-                    dbg!(response);
+                    trace!("Finished compilation successfully");
+                    let client = sockets.get(&client_id).unwrap();
+                    client
+                        .send_model(DefaultModel::new(Response::new(
+                            Some(response),
+                            ResponseOpCode::Compile,
+                        )))
+                        .await
+                        .map_err(|_| ClientError::SendError)?;
                 }
             }
             RequestOpCode::Ping => {
