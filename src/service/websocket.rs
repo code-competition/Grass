@@ -25,8 +25,35 @@ pub async fn accept_connection(
         .peer_addr()
         .expect("connected streams should have a peer address");
 
+    let mut protocol = tokio_tungstenite::tungstenite::http::HeaderValue::from_static("");
+
+    let copy_headers_callback =
+        |request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+         mut response: tokio_tungstenite::tungstenite::handshake::server::Response|
+         -> Result<
+            tokio_tungstenite::tungstenite::handshake::server::Response,
+            tokio_tungstenite::tungstenite::handshake::server::ErrorResponse,
+        > {
+            //access the protocol in the request, then set it in the response
+            protocol = request
+                .headers()
+                .get(tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL)
+                .expect("the client should specify a protocol")
+                .to_owned(); //save the protocol to use outside the closure
+            let response_protocol = request
+                .headers()
+                .get(tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL)
+                .expect("the client should specify a protocol")
+                .to_owned();
+            response.headers_mut().insert(
+                tokio_tungstenite::tungstenite::http::header::SEC_WEBSOCKET_PROTOCOL,
+                response_protocol,
+            );
+            Ok(response)
+        };
+
     // Accept async websocket connection
-    let ws_stream = tokio_tungstenite::accept_async(stream)
+    let ws_stream = tokio_tungstenite::accept_hdr_async(stream, copy_headers_callback)
         .await
         .expect("Error during the websocket handshake occurred");
 
@@ -53,7 +80,6 @@ pub async fn accept_connection(
         let mut read_channel = read
             .try_filter(|message| future::ready(!message.is_close()))
             .enumerate();
-
         loop {
             match read_channel.next().await {
                 Some(s) => match s.1 {

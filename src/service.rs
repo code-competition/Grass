@@ -13,14 +13,12 @@ use uuid::Uuid;
 use self::{
     error::CriticalError,
     redis_pool::RedisConnectionManager,
-    sharding::communication::ShardDefaultModel,
     websocket::client::{game::task::GameTask, SocketClient},
 };
 
 pub mod error;
 pub mod extended_select;
 pub mod redis_pool;
-pub mod sharding;
 pub mod task_loader;
 pub mod websocket;
 
@@ -42,7 +40,7 @@ pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
 */
 
 type ShardingMiddleware<F> =
-    fn(String, Sockets, Pool<RedisConnectionManager>, ShardDefaultModel) -> F;
+    fn(String, Sockets, Pool<RedisConnectionManager>, ()) -> F;
 
 pub struct MiddlewareManager<F>
 where

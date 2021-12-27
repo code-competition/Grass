@@ -1,27 +1,20 @@
 [[tasks]]
 task_id = "248fa5e0-a3ac-4de0-a077-307c80d12126"
-question = "What's 9 + 10?"
-    [[tasks.public_test_cases]]
-    stdin = "9,10"
-    expected = "19"
-    [[tasks.private_test_cases]]
-    stdin = "9,10"
-    expected = "19"
-    [[tasks]]
-task_id = "248fa5e0-a3ac-4de0-a077-307c80d12126"
-question = "What's 9 + 10?"
-    [[tasks.public_test_cases]]
-    stdin = "9,10"
-    expected = "19"
-    [[tasks.private_test_cases]]
-    stdin = "9,10"
-    expected = "19"
-[[tasks]]
-task_id = "248fa5e0-a3ac-4de0-a077-307c80d12126"
-question = "What's 9 + 10?"
-    [[tasks.public_test_cases]]
-    stdin = "9,10"
-    expected = "19"
-    [[tasks.private_test_cases]]
-    stdin = "9,10"
-    expected = "19"
+question = "Given a 2D board of characters and a word, find if the word exists in the grid.\n\nThe word can be constructed from letters of sequentially adjacent cell, where \"adjacent\" cells are those horizontally or vertically neighboring. The same letter cell may not be used more than once."
+difficulty = "easy"
+
+[[tasks.public_test_cases]]
+stdin = "ABCCED&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
+expected = "true"
+
+[[tasks.private_test_cases]]
+stdin = "ABCCED&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
+expected = "true"
+
+[[tasks.private_test_cases]]
+stdin = "SEE&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
+expected = "true"
+
+[[tasks.private_test_cases]]
+stdin = "ABCB&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
+expected = "false"

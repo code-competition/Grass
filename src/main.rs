@@ -1,3 +1,11 @@
+#![deny(absolute_paths_not_starting_with_crate)]
+#![deny(keyword_idents)]
+#![deny(missing_copy_implementations)]
+#![deny(missing_debug_implementations)]
+#![warn(noop_method_call)]
+#![deny(unused_import_braces)]
+#![deny(unused_lifetimes)]
+
 use std::path::Path;
 
 use redis::Commands;

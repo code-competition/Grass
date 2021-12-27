@@ -31,14 +31,16 @@ pub mod models;
 #[derive(Debug, Clone)]
 pub struct SocketClient {
     pub(crate) id: Uuid,
-    addr: SocketAddr,
+    pub(crate) addr: SocketAddr,
     pub(crate) send_channel: SocketSender,
 
     /// Some(...) if user is in a game
     pub(crate) game: Option<Game>,
+    pub(crate) nickname: Option<String>,
 
     /// True if the shutdown was done through event on_close
     performed_safe_shutdown: bool,
+
 }
 
 impl SocketClient {
@@ -48,6 +50,7 @@ impl SocketClient {
             addr,
             send_channel,
             game: None,
+            nickname: None,
             performed_safe_shutdown: false,
         }
     }
@@ -184,14 +187,14 @@ impl SocketClient {
 
     /// Sends a error to the client
     #[inline]
-    pub async fn send_error(&self, err: ClientError<'_>) -> Result<(), ClientError<'_>> {
+    pub async fn send_error<'a>(&self, err: ClientError<'_>) -> Result<(), ClientError<'a>> {
         error!("Sending error {} to client", err);
         self.send_model(DefaultModel::new(err)).await
     }
 
     /// Sends a model (JSON serializable object) to the client
     #[inline]
-    pub async fn send_model<'a, T>(&self, default: DefaultModel<T>) -> Result<(), ClientError<'_>>
+    pub async fn send_model<'a, 'b, T>(&self, default: DefaultModel<T>) -> Result<(), ClientError<'b>>
     where
         T: serde::Serialize + serde::Deserialize<'a>,
     {
@@ -201,7 +204,7 @@ impl SocketClient {
 
     /// Sends a raw websocket message
     #[inline]
-    pub async fn send(&self, message: Message) -> Result<(), ClientError<'_>> {
+    pub async fn send<'a>(&self, message: Message) -> Result<(), ClientError<'a>> {
         self.send_channel
             .send(message)
             .await

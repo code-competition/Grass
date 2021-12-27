@@ -7,13 +7,13 @@ use uuid::Uuid;
 
 use crate::service::{
     redis_pool::RedisConnectionManager,
-    sharding::{self, communication::ShardOpCode},
     websocket::{client::models::DefaultModel, SocketSender},
 };
 
 #[derive(Debug, Clone)]
 pub struct PartialClient {
     pub(crate) id: Uuid,
+    pub(crate) nickname: String,
 
     /// The shard_id where the client is registered
     pub(crate) shard_id: String,
@@ -32,12 +32,14 @@ pub struct PartialClient {
 impl PartialClient {
     pub fn new(
         id: Uuid,
+        nickname: String,
         shard_id: String,
         is_local: bool,
         write_channel: Option<SocketSender>,
     ) -> PartialClient {
         PartialClient {
             id,
+            nickname,
             shard_id,
             is_local,
             write_channel,
@@ -48,7 +50,7 @@ impl PartialClient {
     pub async fn send_message<'a, T>(
         &self,
         message: DefaultModel<T>,
-        redis_pool: &Pool<RedisConnectionManager>,
+        _redis_pool: &Pool<RedisConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
         T: Serialize + Deserialize<'a>,
@@ -59,13 +61,6 @@ impl PartialClient {
                 .unwrap()
                 .send(Message::Text(serde_json::to_string(&message).unwrap()))
                 .await?;
-        } else {
-            sharding::send_redis(
-                redis_pool,
-                (Some(self.id), None),
-                message.to_sharding(),
-                ShardOpCode::SendAsDefaultModelToClient(self.id),
-            )?;
         }
 
         Ok(())

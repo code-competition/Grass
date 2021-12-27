@@ -16,16 +16,22 @@ use crate::service::{
     Sockets,
 };
 
-use self::{compile::CompileRequest, join::JoinRequest, start::StartRequest, task::TaskRequest};
+use self::{
+    compile::CompileRequest, create::CreateRequest, identify::IdentifyRequest, join::JoinRequest,
+    start::StartRequest, task::TaskRequest,
+};
 
 use super::{
     response::{
-        compile::CompilationResponse, join::JoinResponse, ping::PingResponse, task::TaskResponse,
+        compile::CompilationResponse, create::CreateResponse, identify::IdentifyResponse,
+        join::JoinResponse, ping::PingResponse, task::TaskResponse,
     },
     Response, ResponseOpCode,
 };
 
 pub mod compile;
+pub mod create;
+pub mod identify;
 pub mod join;
 pub mod leave;
 pub mod ping;
@@ -63,6 +69,7 @@ impl Request {
                 let client_write_channel;
                 let mut conn;
                 let game;
+                let nickname;
                 {
                     let client = sockets.get(&client_id).unwrap();
                     client_write_channel = client.send_channel.clone();
@@ -75,12 +82,22 @@ impl Request {
                         return Err(ClientError::AlreadyInGame("Client is already in a game"));
                     }
 
+                    // Check if the client has identified itself
+                    if client.nickname.is_none() {
+                        let _ = client.send_error(ClientError::ClientNotIdentified).await;
+                        return Err(ClientError::ClientNotIdentified);
+                    } else {
+                        nickname = client.nickname.as_ref().unwrap().clone();
+                    }
+
                     // get a redis connection from the pool
                     conn = match redis_pool.get() {
                         Ok(c) => c,
                         Err(_) => {
                             let _ = client
-                                .send_error(ClientError::InternalServerError(""))
+                                .send_error(ClientError::InternalServerError(
+                                    "Internal Server Error",
+                                ))
                                 .await;
                             return Err(ClientError::InternalServerError("Internal Server Error"));
                         }
@@ -122,12 +139,14 @@ impl Request {
                         join_game.game_id.clone(),
                         PartialClient::new(
                             client.id,
+                            client.nickname.as_ref().unwrap().to_owned(),
                             redis_game.shard_id.clone(),
                             true,
                             Some(client.send_channel.clone()),
                         ),
                         PartialClient::new(
                             client.id,
+                            client.nickname.as_ref().unwrap().to_owned(),
                             redis_game.shard_id,
                             true,
                             Some(client.send_channel.clone()),
@@ -159,10 +178,13 @@ impl Request {
                         let mut response = None;
                         let game_host_send_channel;
 
+                        let host_nickname;
                         {
                             let host = sockets.get_mut(&redis_game.host_id);
                             match host {
                                 Some(mut game_host_client) => {
+                                    host_nickname =
+                                        game_host_client.nickname.as_ref().unwrap().clone();
                                     game_host_send_channel =
                                         Some(game_host_client.send_channel.clone());
                                     if let Some(game_host_client_game) = &mut game_host_client.game
@@ -171,6 +193,7 @@ impl Request {
                                         if game_host_client_game
                                             .register(PartialClient::new(
                                                 client_id,
+                                                nickname.to_owned(),
                                                 shard_id.to_string(),
                                                 true,
                                                 Some(client_write_channel),
@@ -215,12 +238,14 @@ impl Request {
                                 join_game.game_id.clone(),
                                 PartialClient::new(
                                     client.id,
+                                    nickname.to_owned(),
                                     shard_id.to_string(),
                                     true,
                                     Some(client.send_channel.clone()),
                                 ),
                                 PartialClient::new(
                                     redis_game.host_id,
+                                    host_nickname,
                                     shard_id.to_string(),
                                     true,
                                     Some(game_host_send_channel.unwrap()),
@@ -243,6 +268,24 @@ impl Request {
                             .send_model(response.unwrap())
                             .await
                             .map_err(|_| ClientError::SendError)?;
+                    } else {
+                        let mut conn = redis_pool.get().unwrap();
+                        let _: () = conn
+                            .del(join_game.game_id.clone())
+                            .map_err(|_| ClientError::InternalServerError("Game was corrupt"))?;
+                        let client = sockets.get(&client_id).unwrap();
+                        client
+                            .send_model(DefaultModel::new(Response::new(
+                                Some(JoinResponse {
+                                    game_id: join_game.game_id,
+                                    is_host: false,
+                                    success: false,
+                                }),
+                                ResponseOpCode::Join,
+                            )))
+                            .await
+                            .map_err(|_| ClientError::SendError)?;
+                        return Err(ClientError::NoGameWasFound);
                     }
                 }
             }
@@ -428,6 +471,54 @@ impl Request {
                     .await
                     .map_err(|_| ClientError::SendError)?;
             }
+            RequestOpCode::Identify => {
+                let mut client = sockets.get_mut(&client_id).unwrap();
+                if client.nickname.is_none() {
+                    let request: IdentifyRequest = serde_json::from_value(self.d.unwrap())
+                        .map_err(|_| ClientError::ParsingError)?;
+
+                    // Todo: check how appropiate a nickname is
+                    client.nickname = Some(request.nickname);
+                    client
+                        .send_model(DefaultModel::new(Response::new(
+                            Some(IdentifyResponse { success: true }),
+                            ResponseOpCode::Identify,
+                        )))
+                        .await
+                        .map_err(|_| ClientError::SendError)?;
+                } else {
+                    client
+                        .send_model(DefaultModel::new(Response::new(
+                            Some(IdentifyResponse { success: false }),
+                            ResponseOpCode::Identify,
+                        )))
+                        .await
+                        .map_err(|_| ClientError::SendError)?;
+                }
+            }
+            RequestOpCode::Create => {
+                let _: CreateRequest = serde_json::from_value(self.d.unwrap())
+                    .map_err(|_| ClientError::ParsingError)?;
+
+                let alphabet: &[char] = &['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
+                let game_id = nanoid::nanoid!(10, alphabet);
+
+                let mut conn = redis_pool
+                    .get()
+                    .map_err(|_| ClientError::InternalServerError("Cache error"))?;
+                let _: () = conn
+                    .set(format!("GAME:{}", game_id.clone()), "")
+                    .map_err(|_| ClientError::InternalServerError("Cache error"))?;
+
+                let client = sockets.get(&client_id).unwrap();
+                client
+                    .send_model(DefaultModel::new(Response::new(
+                        Some(CreateResponse { game_id }),
+                        ResponseOpCode::Create,
+                    )))
+                    .await
+                    .map_err(|_| ClientError::SendError)?;
+            }
         }
 
         Ok(())
@@ -442,6 +533,8 @@ pub enum RequestOpCode {
     Task,
     Compile,
     Ping,
+    Identify,
+    Create,
 }
 
 impl OpCodeFetcher for Request {

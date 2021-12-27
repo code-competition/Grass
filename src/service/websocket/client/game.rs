@@ -373,6 +373,7 @@ impl Game {
                     DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
                         game_id: self.game_id.clone(),
                         client_id: *clients.0,
+                        nickname: clients.1.nickname.clone(),
                     })),
                     &self.redis_pool,
                 )
@@ -385,6 +386,7 @@ impl Game {
                 DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
                     game_id: self.game_id.clone(),
                     client_id: self.partial_host.id,
+                    nickname: self.partial_host.nickname.clone(),
                 })),
                 &self.redis_pool,
             )
@@ -396,6 +398,7 @@ impl Game {
                 DefaultModel::new(GameEvent::new(ConnectedClientGameEvent {
                     game_id: self.game_id.clone(),
                     client_id: partial_client.id,
+                    nickname: partial_client.nickname.clone(),
                 })),
                 &self.redis_pool,
             )

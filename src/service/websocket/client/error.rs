@@ -18,6 +18,7 @@ pub enum ClientError<'a> {
     NoGameWasFound,
     GameNotStarted,
     GameAlreadyStarted,
+    ClientNotIdentified,
     InvalidGameID,
     InvalidOpCode,
     ParsingError,
