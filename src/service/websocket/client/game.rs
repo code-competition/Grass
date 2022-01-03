@@ -257,8 +257,12 @@ impl Game {
         // Check if all public tests succeeded
         if public_finished_tests.len() != task.public_test_cases.len() {
             let mut finished_public_tests = Vec::new();
-            public_finished_tests.iter().enumerate().for_each(|(x, d)| {
-                finished_public_tests.push(PublicTestProgress::new_failed(x, d.1.clone(), d.0.expected.to_owned()))
+            public_finished_tests.iter().for_each(|d| {
+                finished_public_tests.push(PublicTestProgress::new_failed(
+                    d.0.id,
+                    d.1.clone(),
+                    d.0.expected.to_owned(),
+                ))
             });
             for (index, _) in public_finished_tests.iter().enumerate() {
                 finished_public_tests
@@ -269,8 +273,12 @@ impl Game {
             }
 
             // add all the failed tests to the response
-            public_failed_tests.iter().enumerate().for_each(|(x, d)| {
-                finished_public_tests.push(PublicTestProgress::new_failed(x, d.1.clone(), d.0.expected.to_owned()))
+            public_failed_tests.iter().for_each(|d| {
+                finished_public_tests.push(PublicTestProgress::new_failed(
+                    d.0.id,
+                    d.1.clone(),
+                    d.0.expected.to_owned(),
+                ))
             });
 
             // sort the tests by id
@@ -290,7 +298,9 @@ impl Game {
         public_finished_tests
             .into_iter()
             .enumerate()
-            .for_each(|(x, d)| finished_public_tests.push(PublicTestProgress::new(x, d.1, d.0.expected.to_owned())));
+            .for_each(|(x, d)| {
+                finished_public_tests.push(PublicTestProgress::new(x, d.1, d.0.expected.to_owned()))
+            });
 
         // If the public tests succeeded, test against the private test cases
         // Run all public tests, if they all succeed, run the private ones too

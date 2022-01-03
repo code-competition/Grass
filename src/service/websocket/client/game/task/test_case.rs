@@ -7,4 +7,7 @@ pub struct TestCase {
 
     /// the output the program is expected to return
     pub(crate) expected: String,
+
+    /// local id
+    pub(crate) id: usize,
 }

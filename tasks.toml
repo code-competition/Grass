@@ -6,19 +6,19 @@ difficulty = "easy"
 [[tasks.public_test_cases]]
 stdin = "ABCCED&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
 expected = "true"
+id = 0
 
 [[tasks.public_test_cases]]
 stdin = "ABCB&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
 expected = "false"
-
-
-
-
+id = 1
 
 [[tasks.private_test_cases]]
 stdin = "ABCCED&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
 expected = "true"
+id = 0
 
 [[tasks.private_test_cases]]
 stdin = "SEE&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
 expected = "true"
+id = 1
