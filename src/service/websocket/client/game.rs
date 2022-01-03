@@ -25,7 +25,7 @@ use self::{
             disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent,
             task::TaskGameEvent,
         },
-        response::compile::CompilationResponse,
+        response::compile::{progress::PublicTestProgress, CompilationResponse},
     },
     partial_client::PartialClient,
     sandbox::{sandbox_service_client::SandboxServiceClient, SandboxRequest, SandboxResponse},
@@ -210,16 +210,17 @@ impl Game {
         if !result.success {
             return Ok(CompilationResponse {
                 task_index,
-                task_test_progress: vec![],
+                public_test_progress: vec![],
                 is_done: false,
-                is_done_with_public_tests: false,
-                is_done_with_private_tests: false,
+                is_done_public_tests: false,
+                is_done_private_tests: false,
                 stderr: result.stderr.join(""),
             });
         }
 
-        // Verify output against public tests
+        // ! Verify output against public tests
         let mut public_finished_tests = Vec::new();
+        let mut public_failed_tests = Vec::new();
         for (i, mut s) in result.stdout.into_iter().enumerate() {
             if s.ends_with('\n') {
                 s.pop();
@@ -233,38 +234,63 @@ impl Game {
                 ))?
                 .expected
             {
-                public_finished_tests.push(task.public_test_cases.get(i).ok_or(
-                    ClientError::InternalServerError("task response length mismatch"),
-                )?);
+                public_finished_tests.push((
+                    task.public_test_cases
+                        .get(i)
+                        .ok_or(ClientError::InternalServerError(
+                            "task response length mismatch",
+                        ))?,
+                    s,
+                ));
+            } else {
+                public_failed_tests.push((
+                    task.public_test_cases
+                        .get(i)
+                        .ok_or(ClientError::InternalServerError(
+                            "task response length mismatch",
+                        ))?,
+                    s,
+                ));
             }
         }
 
         // Check if all public tests succeeded
         if public_finished_tests.len() != task.public_test_cases.len() {
             let mut finished_public_tests = Vec::new();
-            public_finished_tests
-                .iter()
-                .enumerate()
-                .for_each(|(x, _)| finished_public_tests.push((x, false)));
+            public_finished_tests.iter().enumerate().for_each(|(x, d)| {
+                finished_public_tests.push(PublicTestProgress::new_failed(x, d.1.clone(), d.0.expected.to_owned()))
+            });
             for (index, _) in public_finished_tests.iter().enumerate() {
-                *finished_public_tests.get_mut(index).unwrap() = (index, true);
+                finished_public_tests
+                    .get_mut(index)
+                    .as_mut()
+                    .unwrap()
+                    .make_not_failed();
             }
+
+            // add all the failed tests to the response
+            public_failed_tests.iter().enumerate().for_each(|(x, d)| {
+                finished_public_tests.push(PublicTestProgress::new_failed(x, d.1.clone(), d.0.expected.to_owned()))
+            });
+
+            // sort the tests by id
+            finished_public_tests.sort_by(|x, y| x.test_index.cmp(&y.test_index));
 
             return Ok(CompilationResponse {
                 task_index,
-                task_test_progress: finished_public_tests,
+                public_test_progress: finished_public_tests,
                 is_done: false,
-                is_done_with_public_tests: false,
-                is_done_with_private_tests: false,
+                is_done_public_tests: false,
+                is_done_private_tests: false,
                 stderr: result.stderr.first().unwrap_or(&String::new()).to_string(),
             });
         }
 
         let mut finished_public_tests = Vec::new();
         public_finished_tests
-            .iter()
+            .into_iter()
             .enumerate()
-            .for_each(|(x, _)| finished_public_tests.push((x, true)));
+            .for_each(|(x, d)| finished_public_tests.push(PublicTestProgress::new(x, d.1, d.0.expected.to_owned())));
 
         // If the public tests succeeded, test against the private test cases
         // Run all public tests, if they all succeed, run the private ones too
@@ -278,15 +304,15 @@ impl Game {
         if !result.success {
             return Ok(CompilationResponse {
                 task_index,
-                task_test_progress: finished_public_tests,
+                public_test_progress: finished_public_tests,
                 is_done: false,
-                is_done_with_public_tests: true,
-                is_done_with_private_tests: false,
+                is_done_public_tests: true,
+                is_done_private_tests: false,
                 stderr: result.stderr.join(""),
             });
         }
 
-        // Verify output against public tests
+        // Verify output against private tests
         let mut private_finished_tests = Vec::new();
         for (i, mut s) in result.stdout.into_iter().enumerate() {
             if s.ends_with('\n') {
@@ -311,10 +337,10 @@ impl Game {
         if private_finished_tests.len() != task.private_test_cases.len() {
             return Ok(CompilationResponse {
                 task_index,
-                task_test_progress: finished_public_tests,
+                public_test_progress: finished_public_tests,
                 is_done: false,
-                is_done_with_public_tests: true,
-                is_done_with_private_tests: false,
+                is_done_public_tests: true,
+                is_done_private_tests: false,
                 stderr: result.stderr.first().unwrap_or(&String::new()).to_string(),
             });
         }
@@ -329,10 +355,10 @@ impl Game {
         superluminal_perf::end_event();
         Ok(CompilationResponse {
             task_index,
-            task_test_progress: finished_public_tests,
+            public_test_progress: finished_public_tests,
             is_done: true,
-            is_done_with_public_tests: true,
-            is_done_with_private_tests: true,
+            is_done_public_tests: true,
+            is_done_private_tests: true,
             stderr: String::new(),
         })
     }
