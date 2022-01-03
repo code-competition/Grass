@@ -11,6 +11,7 @@ pub mod ping;
 pub mod compile;
 pub mod identify;
 pub mod create;
+pub mod exists;
 
 // Models for responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,6 +37,7 @@ pub enum ResponseOpCode {
     Compile,
     Identify,
     Create,
+    Exists,
 }
 
 impl<T> OpCodeFetcher for Response<T> {

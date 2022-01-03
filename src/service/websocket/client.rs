@@ -106,6 +106,7 @@ impl SocketClient {
         shard_id: String,
         sockets: Sockets,
     ) -> Result<bool, ClientError<'a>> {
+        superluminal_perf::begin_event("on message");
         let mut should_close = false;
         match message {
             Message::Text(text) => {
@@ -182,6 +183,7 @@ impl SocketClient {
             _ => {}
         }
 
+        superluminal_perf::end_event();
         Ok(should_close)
     }
 

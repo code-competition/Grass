@@ -17,20 +17,21 @@ use crate::service::{
 };
 
 use self::{
-    compile::CompileRequest, create::CreateRequest, identify::IdentifyRequest, join::JoinRequest,
-    start::StartRequest, task::TaskRequest,
+    compile::CompileRequest, create::CreateRequest, exists::ExistsRequest,
+    identify::IdentifyRequest, join::JoinRequest, start::StartRequest, task::TaskRequest,
 };
 
 use super::{
     response::{
-        compile::CompilationResponse, create::CreateResponse, identify::IdentifyResponse,
-        join::JoinResponse, ping::PingResponse, task::TaskResponse,
+        compile::CompilationResponse, create::CreateResponse, exists::ExistsResponse,
+        identify::IdentifyResponse, join::JoinResponse, ping::PingResponse, task::TaskResponse,
     },
     Response, ResponseOpCode,
 };
 
 pub mod compile;
 pub mod create;
+pub mod exists;
 pub mod identify;
 pub mod join;
 pub mod leave;
@@ -519,6 +520,48 @@ impl Request {
                     .await
                     .map_err(|_| ClientError::SendError)?;
             }
+            RequestOpCode::Exists => {
+                let request: ExistsRequest = serde_json::from_value(self.d.unwrap())
+                    .map_err(|_| ClientError::ParsingError)?;
+
+                let mut conn = redis_pool
+                    .get()
+                    .map_err(|_| ClientError::InternalServerError("Cache error"))?;
+
+                // check if game exists in redis
+                let res = match conn.get::<String, String>(format!("GAME:{}", request.game_id)) {
+                    Ok(game) => match game.as_str() {
+                        "" => ExistsResponse { exists: true },
+                        _ => {
+                            // Verify that game is still valid
+                            let redis_game: RedisGame =
+                                serde_json::from_str(&game).map_err(|_| {
+                                    ClientError::InternalServerError("Failed to parse game")
+                                })?;
+
+                            // Remove the game if the host has left but the service failed to remove the game
+                            if sockets.get(&redis_game.host_id).is_none() {
+                                let _: redis::RedisResult<()> =
+                                    conn.del(format!("GAME:{}", request.game_id));
+
+                                ExistsResponse { exists: false }
+                            } else {
+                                ExistsResponse { exists: true }
+                            }
+                        }
+                    },
+                    Err(_) => ExistsResponse { exists: false },
+                };
+
+                let client = sockets.get(&client_id).unwrap();
+                client
+                    .send_model(DefaultModel::new(Response::new(
+                        Some(res),
+                        ResponseOpCode::Exists,
+                    )))
+                    .await
+                    .map_err(|_| ClientError::SendError)?;
+            }
         }
 
         Ok(())
@@ -535,6 +578,7 @@ pub enum RequestOpCode {
     Ping,
     Identify,
     Create,
+    Exists,
 }
 
 impl OpCodeFetcher for Request {

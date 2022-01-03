@@ -39,8 +39,7 @@ pub type Sockets = Arc<DashMap<Uuid, SocketClient>>;
     └────► on received from other sharding ────► send to middleware
 */
 
-type ShardingMiddleware<F> =
-    fn(String, Sockets, Pool<RedisConnectionManager>, ()) -> F;
+type ShardingMiddleware<F> = fn(String, Sockets, Pool<RedisConnectionManager>, ()) -> F;
 
 pub struct MiddlewareManager<F>
 where
@@ -131,6 +130,8 @@ impl<'a> Service<'a> {
     where
         F: Future + Send + 'static,
     {
+        superluminal_perf::begin_event_with_color("Service runner", 0x3ca358);
+
         // Create a seperate thread for WebSockets
         let redis_pool = self.redis_pool.clone();
         let socket_connections = self.connections.clone();
@@ -143,6 +144,7 @@ impl<'a> Service<'a> {
         let pool = redis_pool.clone();
         let available_tasks = self.available_tasks.clone();
         let joinhandle_ws = tokio::spawn(async move {
+            superluminal_perf::begin_event_with_color("Websocket server", 0x3f7ea6);
             trace!("Launching socket shard");
             let try_socket = TcpListener::bind(&host_addr).await;
             let listener = try_socket.expect("Failed to bind");
@@ -150,6 +152,7 @@ impl<'a> Service<'a> {
 
             while let Ok((stream, _)) = listener.accept().await {
                 let available_tasks = available_tasks.clone();
+                superluminal_perf::begin_event("accept connection");
                 tokio::spawn(websocket::accept_connection(
                     stream,
                     available_tasks,
@@ -157,7 +160,9 @@ impl<'a> Service<'a> {
                     socket_connections.clone(),
                     shard_id.to_string(),
                 ));
+                superluminal_perf::end_event();
             }
+            superluminal_perf::end_event();
         });
 
         // Clone arcs and get ip addresses for redis to send into redis reader task
@@ -169,6 +174,8 @@ impl<'a> Service<'a> {
         // Spawns the tokio task that handles all incoming messages from redis
         let _pool = redis_pool.clone();
         let joinhandle_presence = tokio::spawn(async move {
+            superluminal_perf::begin_event("Redis pub/sub reader");
+
             // Opens a new redis connection outside the pool to leverage better connection speeds
             let client = redis::Client::open(redis_addr).expect("redis connection failed");
             let mut con = client
@@ -211,7 +218,10 @@ impl<'a> Service<'a> {
                     ControlFlow::Continue
                 })
                 .unwrap();
+            superluminal_perf::end_event();
         });
+
+        superluminal_perf::end_event();
 
         // This custom select function exits when one of the futures returns,
         // In case of a critical error the service will exit (error_rx)

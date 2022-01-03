@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(config) => config,
         Err(_) => Config {
             address: "0.0.0.0".into(),
-            port: 5000,
+            port: 50000,
             redis_addr: "redis://127.0.0.1:35374".into(),
         },
     };

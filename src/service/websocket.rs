@@ -69,6 +69,12 @@ pub async fn accept_connection(
     let client = SocketClient::new(addr, sender.clone());
     sockets.insert(*client.id(), client.clone());
 
+    superluminal_perf::begin_event_with_data(
+        "websocket client",
+        &client.id().to_string(),
+        0x562db5,
+    );
+
     // Prepare reader task
     // This task reads all incoming messages from the **CLIENT** coming through the TcpListener
     let local_shard_id_message = shard_id.clone();
@@ -81,6 +87,7 @@ pub async fn accept_connection(
             .try_filter(|message| future::ready(!message.is_close()))
             .enumerate();
         loop {
+            superluminal_perf::begin_event("websocket client read");
             match read_channel.next().await {
                 Some(s) => match s.1 {
                     Ok(message) => {
@@ -114,12 +121,14 @@ pub async fn accept_connection(
                     return tokio_tungstenite::tungstenite::Error::ConnectionClosed;
                 }
             }
+            superluminal_perf::end_event();
         }
     });
 
     // Handle messages sent from the SocketClient struct that was fetched from the connections hashmap
     let write_channel = tokio::spawn(async move {
         loop {
+            superluminal_perf::begin_event("websocket client write");
             match receiver.recv().await {
                 Some(message) => match write.send(message).await {
                     Ok(_) => {
@@ -137,6 +146,7 @@ pub async fn accept_connection(
                     break;
                 }
             }
+            superluminal_perf::end_event();
         }
     });
 
@@ -192,4 +202,6 @@ pub async fn accept_connection(
     // Remove the socket locally
     sockets.remove(client.id());
     info!("Socket disconnected: {}", addr);
+
+    superluminal_perf::end_event();
 }

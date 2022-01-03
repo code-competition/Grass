@@ -26,6 +26,7 @@ impl ClientMessageHandler {
         model: &DefaultModel<Value>,
         shard_id: &str,
     ) -> Result<(), ClientError<'a>> {
+        superluminal_perf::begin_event("handle message");
         let data = if let Some(data) = model.d.to_owned() {
             data
         } else {
@@ -34,6 +35,7 @@ impl ClientMessageHandler {
             ));
         };
 
+        superluminal_perf::end_event();
         match model.op {
             OpCode::Request => {
                 let request: Request =

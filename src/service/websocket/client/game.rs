@@ -108,6 +108,7 @@ impl Game {
         available_tasks: Arc<Vec<GameTask>>,
         task_count: usize,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        superluminal_perf::begin_event("start game");
         self.is_host()?;
         if self.is_started {
             return Err(Box::new(ClientError::GameAlreadyStarted));
@@ -168,6 +169,7 @@ impl Game {
             )
             .await;
 
+        superluminal_perf::end_event();
         Ok(())
     }
 
@@ -178,6 +180,7 @@ impl Game {
         code: String,
         task_index: usize,
     ) -> Result<CompilationResponse, Box<dyn std::error::Error>> {
+        superluminal_perf::begin_event("test code");
         self.is_host()?;
         let task = self
             .get_task_indexed(task_index)
@@ -323,6 +326,7 @@ impl Game {
             .unwrap()
             .insert(task_index, true);
 
+        superluminal_perf::end_event();
         Ok(CompilationResponse {
             task_index,
             task_test_progress: finished_public_tests,
@@ -361,6 +365,7 @@ impl Game {
 
     /// Register a new client with the game
     pub async fn register(&mut self, partial_client: PartialClient) -> Result<(), ()> {
+        superluminal_perf::begin_event("register client");
         // Cancel if user is not game host
         if !self.is_host || !self.public {
             return Err(());
@@ -415,11 +420,13 @@ impl Game {
             .unwrap()
             .insert(partial_client.id, partial_client);
 
+        superluminal_perf::end_event();
         Ok(())
     }
 
     /// Unregister a client from the game
     pub async fn unregister(&mut self, client_id: &Uuid) {
+        superluminal_perf::begin_event("unregister client");
         // Cancel if user is not game host
         if self.is_host
             && self
@@ -440,6 +447,7 @@ impl Game {
                 )
                 .await;
         }
+        superluminal_perf::end_event();
     }
 
     /// Send a message to all connected clients in the game
@@ -451,6 +459,7 @@ impl Game {
     where
         T: Serialize + Deserialize<'a> + Clone,
     {
+        superluminal_perf::begin_event("send global within game");
         self.is_host()?;
         trace!("Sending a global message to all clients in a game");
 
@@ -473,11 +482,13 @@ impl Game {
         // Send message to host
         self.partial_host.send_message(message, redis_pool).await?;
 
+        superluminal_perf::end_event();
         Ok(())
     }
 
     /// Force shutdown the game
     pub async fn shutdown(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        superluminal_perf::begin_event("shutdown game");
         self.is_host()?;
 
         trace!(
@@ -514,6 +525,7 @@ impl Game {
                 &self.redis_pool,
             )
             .await?;
+        superluminal_perf::end_event();
         Ok(())
     }
 
@@ -530,6 +542,7 @@ impl Game {
 
 impl Drop for Game {
     fn drop(&mut self) {
+        superluminal_perf::begin_event("dropping game");
         info!("Dropping a game object");
         if self.is_host {
             info!("Shutting down a game");
@@ -552,5 +565,6 @@ impl Drop for Game {
                 &self.redis_pool,
             ));
         }
+        superluminal_perf::end_event();
     }
 }
