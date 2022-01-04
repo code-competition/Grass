@@ -21,10 +21,7 @@ use crate::service::{
 
 use self::{
     models::{
-        event::{
-            disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent,
-            task::TaskGameEvent,
-        },
+        event::{disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent},
         response::compile::{progress::PublicTestProgress, CompilationResponse},
     },
     partial_client::PartialClient,
@@ -138,7 +135,7 @@ impl Game {
             }
         }
 
-        // Add taks to host
+        // Add tasks to host
         self.partial_host.task_progress = Some(HashMap::new());
         for task in self.tasks.iter().enumerate() {
             self.partial_host
@@ -148,23 +145,10 @@ impl Game {
                 .insert(task.0, false);
         }
 
-        // Get the first task to send to all clients
-        let task = self.get_task_indexed(0).unwrap();
-
         // Send game start notice to all clients
         let _ = self
             .send_global(
                 DefaultModel::new(GameEvent::new(StartGameEvent { task_count })),
-                &self.redis_pool,
-            )
-            .await;
-
-        // Send the first task to all clients
-        let _ = self
-            .send_global(
-                DefaultModel::new(GameEvent::new(TaskGameEvent {
-                    task: task.to_owned(),
-                })),
                 &self.redis_pool,
             )
             .await;
