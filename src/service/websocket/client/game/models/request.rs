@@ -23,8 +23,8 @@ use self::{
 
 use super::{
     response::{
-        compile::CompilationResponse, create::CreateResponse, exists::ExistsResponse,
-        identify::IdentifyResponse, join::JoinResponse, ping::PingResponse, task::TaskResponse,
+        create::CreateResponse, exists::ExistsResponse, identify::IdentifyResponse,
+        join::JoinResponse, ping::PingResponse, task::TaskResponse,
     },
     Response, ResponseOpCode,
 };
@@ -415,20 +415,77 @@ impl Request {
                 let request: CompileRequest = serde_json::from_value(self.d.unwrap())
                     .map_err(|_| ClientError::ParsingError)?;
 
-                let response: (Option<CompilationResponse>, Option<ClientError>) = {
+                let response: (Option<_>, Option<ClientError>) = {
+                    if let Some(host) = &mut sockets.get_mut(&host_id) {
+                        if let Some(game) = &mut host.game {
+                            if !game.is_started {
+                                (None, Some(ClientError::GameNotStarted))
+                            } else {
+                                match game.prepare_code_test(request.task_index).await {
+                                    Ok(r) => (Some(r), None),
+                                    Err(_) => (
+                                        None,
+                                        Some(ClientError::CompilationError("Host was not host")),
+                                    ),
+                                }
+                            }
+                        } else {
+                            (
+                                None,
+                                Some(ClientError::InternalServerError("Host was not in the game")),
+                            )
+                        }
+                    } else {
+                        (
+                            None,
+                            Some(ClientError::InternalServerError("Host does not exist")),
+                        )
+                    }
+                };
+
+                // Check for error
+                if let Some(error) = response.1 {
+                    let client = sockets.get(&client_id).unwrap();
+                    let _ = client.send_error(error.clone()).await;
+                    return Err(error);
+                }
+
+                let response = match Game::run_code_test(
+                    &client_id,
+                    request.code.clone(),
+                    response.0.unwrap(),
+                )
+                .await
+                {
+                    Ok(r) => r,
+                    Err(_) => {
+                        let err = ClientError::CompilationError("failed to compile");
+                        // let client = sockets.get(&client_id).unwrap();
+                        // let _ = client.send_error(err.clone()).await;
+                        return Err(err);
+                    }
+                };
+
+                // Fetch the host again
+                let response: (Option<_>, Option<ClientError>) = {
                     if let Some(host) = &mut sockets.get_mut(&host_id) {
                         if let Some(game) = &mut host.game {
                             if !game.is_started {
                                 (None, Some(ClientError::GameNotStarted))
                             } else {
                                 match game
-                                    .test_code(&client_id, request.code, request.task_index)
+                                    .validate_code_test(
+                                        &client_id,
+                                        request.task_index,
+                                        request.code,
+                                        response,
+                                    )
                                     .await
                                 {
                                     Ok(r) => (Some(r), None),
                                     Err(_) => (
                                         None,
-                                        Some(ClientError::CompilationError("failed to compile")),
+                                        Some(ClientError::CompilationError("Compilation failed")),
                                     ),
                                 }
                             }

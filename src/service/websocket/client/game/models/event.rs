@@ -5,6 +5,7 @@ use crate::service::websocket::client::models::{OpCode, OpCodeFetcher};
 pub mod shutdown;
 pub mod start;
 pub mod task;
+pub mod task_finished;
 
 /// Event sent to everyone in a game when a new client is connected (not sent to the client itself)
 pub mod connected_client;
@@ -37,6 +38,8 @@ pub enum GameEventOpCode {
 
     Start,
     Task,
+
+    TaskFinished,
 
     /// Event sent to everyone in a game when a new client is connected (not sent to the client itself)
     ConnectedClient,

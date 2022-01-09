@@ -21,7 +21,10 @@ use crate::service::{
 
 use self::{
     models::{
-        event::{disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent},
+        event::{
+            disconnected_client::DisconnectedClientGameEvent, start::StartGameEvent,
+            task_finished::TaskFinishedGameEvent,
+        },
         response::compile::{progress::PublicTestProgress, CompilationResponse},
     },
     partial_client::PartialClient,
@@ -149,6 +152,7 @@ impl Game {
         let _ = self
             .send_global(
                 DefaultModel::new(GameEvent::new(StartGameEvent { task_count })),
+                None,
                 &self.redis_pool,
             )
             .await;
@@ -157,15 +161,44 @@ impl Game {
         Ok(())
     }
 
-    /// Compile client code and return result
-    pub async fn test_code(
+    pub async fn prepare_code_test(
         &mut self,
+        task_index: usize,
+    ) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        self.is_host()?;
+        let task = self
+            .get_task_indexed(task_index)
+            .map_err(|_| ClientError::OutOfRangeTask)?
+            .to_owned();
+
+        // Run all public tests, if they all succeed, run the private ones too
+        Ok(task
+            .public_test_cases
+            .iter()
+            .map(|test| test.stdin.to_owned())
+            .collect::<Vec<String>>())
+    }
+
+    pub async fn run_code_test(
         client_id: &Uuid,
         code: String,
+        gathered_stdin: Vec<String>,
+    ) -> Result<SandboxResponse, Box<dyn std::error::Error>> {
+        let result = Self::compile_code(client_id, code.clone(), gathered_stdin).await?;
+
+        Ok(result)
+    }
+
+    /// Compile client code and return result
+    pub async fn validate_code_test(
+        &mut self,
+        client_id: &Uuid,
         task_index: usize,
+        code: String,
+        result: SandboxResponse,
     ) -> Result<CompilationResponse, Box<dyn std::error::Error>> {
         superluminal_perf::begin_event("test code");
-        self.is_host()?;
+        // self.is_host()?;
         let task = self
             .get_task_indexed(task_index)
             .map_err(|_| ClientError::OutOfRangeTask)?
@@ -182,14 +215,6 @@ impl Game {
         } else {
             &mut self.partial_host
         };
-
-        // Run all public tests, if they all succeed, run the private ones too
-        let gathered_stdin = task
-            .public_test_cases
-            .iter()
-            .map(|test| test.stdin.to_owned())
-            .collect::<Vec<String>>();
-        let result = Self::compile_code(client_id, code.clone(), gathered_stdin).await?;
 
         if !result.success {
             return Ok(CompilationResponse {
@@ -346,6 +371,15 @@ impl Game {
             .unwrap()
             .insert(task_index, true);
 
+        // Send global event, client has succeeded with task
+        let _ = self
+            .send_global(
+                DefaultModel::new(GameEvent::new(TaskFinishedGameEvent { task, task_index, client_id: *client_id })),
+                Some(&[client_id]),
+                &self.redis_pool,
+            )
+            .await;
+
         superluminal_perf::end_event();
         Ok(CompilationResponse {
             task_index,
@@ -362,8 +396,10 @@ impl Game {
         client_id: &Uuid,
         code: String,
         stdin: Vec<String>,
-    ) -> Result<SandboxResponse, Box<dyn std::error::Error>> {
-        let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051").await?;
+    ) -> Result<SandboxResponse, ClientError<'static>> {
+        let mut client = SandboxServiceClient::connect("http://127.0.0.1:50051")
+            .await
+            .map_err(|_| ClientError::InternalServerError("internal compilation error"))?;
         let request = tonic::Request::new(SandboxRequest {
             user_id: client_id.to_string(),
             code,
@@ -371,7 +407,9 @@ impl Game {
             language: sandbox::Language::Rust as i32,
         });
 
-        Ok((client.compile(request).await)?.into_inner())
+        Ok((client.compile(request).await)
+            .map_err(|_| ClientError::InternalServerError("internal compilation error"))?
+            .into_inner())
     }
 
     /// Fetches a task at index
@@ -425,6 +463,7 @@ impl Game {
                     client_id: partial_client.id,
                     nickname: partial_client.nickname.clone(),
                 })),
+                None,
                 &self.redis_pool,
             )
             .await;
@@ -463,6 +502,7 @@ impl Game {
                         game_id: self.game_id.clone(),
                         client_id: *client_id,
                     })),
+                    None,
                     &self.redis_pool,
                 )
                 .await;
@@ -474,6 +514,7 @@ impl Game {
     pub async fn send_global<'a, T>(
         &self,
         message: DefaultModel<T>,
+        skip_client_ids: Option<&[&Uuid]>,
         redis_pool: &Pool<RedisConnectionManager>,
     ) -> Result<(), Box<dyn std::error::Error>>
     where
@@ -490,7 +531,12 @@ impl Game {
             .ok_or(ClientError::InternalServerError("not host"))?
             .iter()
         {
-            // Todo: Better error handling when it fails to send message to client
+            if let Some(skip_client_ids) = skip_client_ids {
+                if skip_client_ids.contains(&client.0) {
+                    continue;
+                }
+            }
+
             if let Err(e) = client.1.send_message(message.clone(), redis_pool).await {
                 error!(
                     "Failed to send global message to client with id {}, error {}",
@@ -500,7 +546,16 @@ impl Game {
         }
 
         // Send message to host
-        self.partial_host.send_message(message, redis_pool).await?;
+        let mut should_skip_host = false;
+        if let Some(skip_client_ids) = skip_client_ids {
+            if skip_client_ids.contains(&&self.partial_host.id) {
+                should_skip_host = true;
+            }
+        }
+
+        if !should_skip_host {
+            self.partial_host.send_message(message, redis_pool).await?;
+        }
 
         superluminal_perf::end_event();
         Ok(())
