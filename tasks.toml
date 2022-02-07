@@ -22,3 +22,68 @@ id = 0
 stdin = "SEE&[['A','B','C','E'],['S','F','C','S'],['A','D','E','E']]"
 expected = "true"
 id = 1
+
+[[tasks]]
+task_id = "559203c7-33eb-4b35-b0be-18537b0d1bc4"
+question = "Given a 32-bit integer, return the number with its bits reversed."
+difficulty = "easy"
+
+[[tasks.public_test_cases]]
+stdin = "1111 0000 1111 0000 1111 0000 1111 0000"
+expected = "0000 1111 0000 1111 0000 1111 0000 1111"
+id = 0
+
+[[tasks.private_test_cases]]
+stdin = "1111 0000 1111 0000 1111 0000 1111 0000"
+expected = "0000 1111 0000 1111 0000 1111 0000 1111"
+id = 0
+
+[[tasks]]
+task_id = "b3cf677d-b7ee-4f90-9ac4-c076fca27951"
+question = "Given a string consisting of parentheses, single digits, and positive and negative signs, convert the string into a mathematical expression to obtain the answer."
+difficulty = "medium"
+
+[[tasks.public_test_cases]]
+stdin = "-1 + (2 + 3)"
+expected = "4"
+id = 0
+
+[[tasks.public_test_cases]]
+stdin = "2*(7)^2"
+expected = "4"
+id = 1
+
+[[tasks.private_test_cases]]
+stdin = "6*(1)^3"
+expected = "0000 1111 0000 1111 0000 1111 0000 1111"
+id = 0
+
+[[tasks]]
+task_id = "d1bfc7fa-0b41-4eb9-8840-1d00ddb825a9"
+question = "Given an array of numbers, find the maximum sum of any contiguous subarray of the array."
+difficulty = "medium"
+
+[[tasks.public_test_cases]]
+stdin = "[34, -50, 42, 14, -5, 86]"
+expected = "137"
+id = 0
+
+[[tasks.private_test_cases]]
+stdin = "[-5, -1, -8, -9]"
+expected = "0"
+id = 0
+
+[[tasks]]
+task_id = "cdbefff5-f977-4d2c-8e44-2a72aca48abb"
+question = "A fixed point in an array is an element whose value is equal to its index. Given a sorted array of distinct elements, return a fixed point, if one exists. Otherwise, return \"false\". "
+difficulty = "easy"
+
+[[tasks.public_test_cases]]
+stdin = "[-6, 0, 2, 40]"
+expected = "2"
+id = 0
+
+[[tasks.private_test_cases]]
+stdin = "[1, 5, 7, 8]"
+expected = "false"
+id = 0
